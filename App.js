@@ -1,25 +1,47 @@
-// ==========================================
-// PARTE 1: CONFIGURAÇÕES E IMPORTS DA API
-// ==========================================
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { 
   View, Text, StyleSheet, TouchableOpacity, ScrollView, 
-  Alert, ActivityIndicator, StatusBar, TextInput, FlatList 
+  Alert, ActivityIndicator, StatusBar, TextInput, FlatList,
+  KeyboardAvoidingView, Platform 
 } from 'react-native';
+
+// Navegação
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 
-// Firebase - Integração com sua API/Banco de dados
-// Certifique-se que o arquivo firebaseConfig.js está na mesma pasta
+// Firebase - Configurações e Autenticação
 import { auth, db } from './firebaseConfig'; 
-import { onAuthStateChanged, signOut, signInWithEmailAndPassword } from 'firebase/auth';
+import { 
+  onAuthStateChanged, 
+  signOut, 
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
+  updateEmail,
+  updatePassword
+} from 'firebase/auth';
+
+// Firebase - Firestore
+import { 
+  collection, 
+  addDoc, 
+  onSnapshot, 
+  query, 
+  where, 
+  orderBy, 
+  doc, 
+  deleteDoc, 
+  updateDoc,
+  setDoc,
+  serverTimestamp 
+} from 'firebase/firestore';
 
 // Inicialização do Contexto Global
-const GastosContext = createContext();
+export const GastosContext = createContext();
 
-// Identidade Visual do Projeto (Cores e Padrões)
+// Identidade Visual do Projeto
 const COLORS = {
   primary: '#0047AB',
   background: '#F8FAFC',
@@ -39,13 +61,8 @@ const CATEGORIAS = [
   { nome: 'Saúde', icone: 'medical', cor: '#FF3B30' }
 ];
 
-// Configuração dos Meses para os Filtros do Resumo
-const MESES = [
-  { label: 'Jan', valor: 0 }, { label: 'Fev', valor: 1 }, { label: 'Mar', valor: 2 },
-  { label: 'Abr', valor: 3 }, { label: 'Mai', valor: 4 }, { label: 'Jun', valor: 5 },
-  { label: 'Jul', valor: 6 }, { label: 'Ago', valor: 7 }, { label: 'Set', valor: 8 },
-  { label: 'Out', valor: 9 }, { label: 'Nov', valor: 10 }, { label: 'Dez', valor: 11 }
-];
+// Configuração dos Meses para os Filtros
+const MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 
 // Instâncias de Navegação
 const Stack = createNativeStackNavigator();
@@ -62,11 +79,19 @@ function TelaLogin({ navigation }) {
   const realizarLogin = () => {
     if (!email || !senha) return Alert.alert("Atenção", "Preencha todos os campos.");
     setCarregando(true);
+    
     signInWithEmailAndPassword(auth, email.trim(), senha)
-      .then(() => console.log("Sucesso"))
+      .then(() => {
+        console.log("Sucesso no login");
+      })
       .catch((error) => {
         setCarregando(false);
-        Alert.alert("Erro de Acesso", "E-mail ou senha incorretos.");
+        console.log("Erro de Login:", error.code);
+        // Tratamento de erro amigável
+        let mensagem = "E-mail ou senha incorretos.";
+        if (error.code === 'auth/user-not-found') mensagem = "Usuário não cadastrado.";
+        if (error.code === 'auth/wrong-password') mensagem = "Senha incorreta.";
+        Alert.alert("Erro de Acesso", mensagem);
       });
   };
 
@@ -82,8 +107,10 @@ function TelaLogin({ navigation }) {
           <TextInput 
             placeholder="E-mail" 
             style={styles.inputLimpo} 
+            value={email}
             onChangeText={setEmail} 
             autoCapitalize="none" 
+            keyboardType="email-address"
           />
         </View>
 
@@ -92,6 +119,7 @@ function TelaLogin({ navigation }) {
           <TextInput 
             placeholder="Senha" 
             style={styles.inputLimpo} 
+            value={senha}
             secureTextEntry 
             onChangeText={setSenha} 
           />
@@ -124,15 +152,22 @@ function TelaCadastro({ navigation }) {
   const [carregando, setCarregando] = useState(false);
 
   const criarConta = () => {
-    if (!email || !senha) return Alert.alert("Erro", "Preencha tudo.");
-    if (senha.length < 6) return Alert.alert("Erro", "Senha muito curta.");
+    if (!email || !senha) return Alert.alert("Erro", "Preencha todos os campos.");
+    if (senha.length < 6) return Alert.alert("Erro", "A senha deve ter no mínimo 6 caracteres.");
 
     setCarregando(true);
     createUserWithEmailAndPassword(auth, email.trim(), senha)
-      .then(() => Alert.alert("Sucesso", "Conta criada!"))
-      .catch(() => {
+      .then(() => {
+        Alert.alert("Sucesso", "Sua conta foi criada! Faça o login para continuar.");
+        navigation.navigate('Login');
+      })
+      .catch((error) => {
         setCarregando(false);
-        Alert.alert("Erro", "Não foi possível criar a conta.");
+        console.log("Erro de Cadastro:", error.code);
+        let mensagem = "Não foi possível criar a conta.";
+        if (error.code === 'auth/email-already-in-use') mensagem = "Este e-mail já está em uso.";
+        if (error.code === 'auth/invalid-email') mensagem = "E-mail inválido.";
+        Alert.alert("Erro", mensagem);
       });
   };
 
@@ -142,11 +177,23 @@ function TelaCadastro({ navigation }) {
       <View style={{ width: '85%', marginTop: 20 }}>
         <View style={styles.areaInput}>
           <Ionicons name="mail-outline" size={20} color={COLORS.textSoft} />
-          <TextInput placeholder="E-mail" style={styles.inputLimpo} onChangeText={setEmail} autoCapitalize="none" />
+          <TextInput 
+            placeholder="E-mail" 
+            style={styles.inputLimpo} 
+            value={email}
+            onChangeText={setEmail} 
+            autoCapitalize="none" 
+          />
         </View>
         <View style={styles.areaInput}>
           <Ionicons name="lock-closed-outline" size={20} color={COLORS.textSoft} />
-          <TextInput placeholder="Senha" style={styles.inputLimpo} secureTextEntry onChangeText={setSenha} />
+          <TextInput 
+            placeholder="Senha (mín. 6 dígitos)" 
+            style={styles.inputLimpo} 
+            value={senha}
+            secureTextEntry 
+            onChangeText={setSenha} 
+          />
         </View>
         <TouchableOpacity style={styles.btnPrimario} onPress={criarConta} disabled={carregando}>
           {carregando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.txtBtn}>Cadastrar</Text>}
@@ -172,12 +219,12 @@ function TelaEsqueciSenha({ navigation }) {
     sendPasswordResetEmail(auth, email.trim())
       .then(() => {
         setCarregando(false);
-        Alert.alert("E-mail enviado", "Verifique sua caixa de entrada.");
+        Alert.alert("E-mail enviado", "Verifique sua caixa de entrada para redefinir sua senha.");
         navigation.goBack();
       })
-      .catch(() => {
+      .catch((error) => {
         setCarregando(false);
-        Alert.alert("Erro", "E-mail não encontrado.");
+        Alert.alert("Erro", "Verifique o e-mail digitado.");
       });
   };
 
@@ -187,7 +234,13 @@ function TelaEsqueciSenha({ navigation }) {
       <View style={{ width: '85%', marginTop: 20 }}>
         <View style={styles.areaInput}>
           <Ionicons name="mail-outline" size={20} color={COLORS.textSoft} />
-          <TextInput placeholder="E-mail" style={styles.inputLimpo} onChangeText={setEmail} autoCapitalize="none" />
+          <TextInput 
+            placeholder="E-mail" 
+            style={styles.inputLimpo} 
+            value={email}
+            onChangeText={setEmail} 
+            autoCapitalize="none" 
+          />
         </View>
         <TouchableOpacity style={styles.btnPrimario} onPress={recuperarSenha}>
           {carregando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.txtBtn}>Enviar Link</Text>}
@@ -200,412 +253,582 @@ function TelaEsqueciSenha({ navigation }) {
   );
 }
 // ==========================================
-// ETAPA 3: TELA DE INÍCIO (HOME)
+// ETAPA 3: TELA DE INÍCIO (HOME) - CORRIGIDA
 // ==========================================
 function TelaHome({ navigation }) {
   const { gastos } = useContext(GastosContext);
   
-  // Proteção para garantir que 'gastos' seja sempre um array antes de processar
   const lista = gastos || []; 
-
-  // Cálculo do Saldo Total usando a API de redução do JavaScript
   const totalGasto = lista.reduce((acc, item) => acc + (item.valor || 0), 0);
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      <StatusBar barStyle="dark-content" />
-      
-      {/* Card Principal de Saldo */}
-      <View style={styles.cardSaldo}>
-        <View>
-          <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 14 }}>Gasto Total Acumulado</Text>
-          <Text style={styles.txtSaldoG}>R$ {totalGasto.toFixed(2)}</Text>
-        </View>
-        <Ionicons name="trending-down" size={40} color="rgba(255,255,255,0.3)" />
-      </View>
-
-      {/* Cabeçalho da Seção de Recentes */}
-      <View style={styles.row}>
-        <Text style={styles.tituloSecao}>Atividades Recentes</Text>
-        <TouchableOpacity 
-          style={styles.btnVerTudo} 
-          onPress={() => navigation.navigate('Histórico')}
-        >
-          <Text style={{ color: COLORS.primary, fontWeight: '600' }}>Ver Tudo</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Lista de Últimos 5 Gastos */}
-      {lista.length === 0 ? (
-        <View style={styles.areaVaziaHome}>
-          <Ionicons name="receipt-outline" size={40} color={COLORS.border} />
-          <Text style={{ color: COLORS.textSoft, marginTop: 10 }}>Nenhum gasto encontrado.</Text>
-        </View>
-      ) : (
-        lista.slice().reverse().slice(0, 5).map((item) => (
-          <View key={item.id} style={styles.cardGastoG}>
-            <View style={[styles.miniIconArea, { backgroundColor: (item.cor || '#CCC') + '20' }]}>
-              <Ionicons name={item.icone || 'cash-outline'} size={22} color={item.cor || COLORS.textSoft} />
-            </View>
-            
-            <View style={{ flex: 1, marginLeft: 15 }}>
-              <Text style={{ fontWeight: 'bold', color: COLORS.text, fontSize: 16 }}>
-                {item.descricao || item.categoria}
-              </Text>
-              <Text style={{ color: COLORS.textSoft, fontSize: 12 }}>
-                {item.data} • {item.emocional || 'Neutro'}
-              </Text>
-            </View>
-
-            <Text style={{ fontWeight: 'bold', color: COLORS.danger, fontSize: 16 }}>
-              - R$ {item.valor.toFixed(2)}
-            </Text>
+    // Usamos uma View flex:1 para permitir que o botão flutue sobre o ScrollView
+    <View style={{ flex: 1, backgroundColor: COLORS.background }}>
+      <ScrollView 
+        style={styles.container} 
+        showsVerticalScrollIndicator={false}
+      >
+        <StatusBar barStyle="dark-content" />
+        
+        {/* Card Principal de Saldo */}
+        <View style={styles.cardSaldo}>
+          <View>
+            <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 14 }}>Gasto Total Acumulado</Text>
+            <Text style={styles.txtSaldoG}>R$ {totalGasto.toFixed(2)}</Text>
           </View>
-        ))
-      )}
+          <Ionicons name="trending-down" size={40} color="rgba(255,255,255,0.3)" />
+        </View>
 
-      {/* Botão Flutuante de Atalho (Opcional) */}
+        {/* Cabeçalho da Seção de Recentes */}
+        <View style={styles.row}>
+          <Text style={styles.tituloSecao}>Atividades Recentes</Text>
+          <TouchableOpacity 
+            style={styles.btnVerTudo} 
+            onPress={() => navigation.navigate('Histórico')}
+          >
+            <Text style={{ color: COLORS.primary, fontWeight: '600' }}>Ver Tudo</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Lista de Últimos 5 Gastos */}
+        {lista.length === 0 ? (
+          <View style={styles.areaVazia}>
+            <Ionicons name="receipt-outline" size={40} color={COLORS.border} />
+            <Text style={{ color: COLORS.textSoft, marginTop: 10 }}>Nenhum gasto encontrado.</Text>
+          </View>
+        ) : (
+          // Inverte a lista para mostrar o mais recente primeiro e pega os 5 primeiros
+          lista.slice().reverse().slice(0, 5).map((item) => (
+            <View key={item.id} style={styles.cardGastoG}>
+              <View style={[styles.miniIconArea, { backgroundColor: (item.cor || '#CCC') + '20' }]}>
+                <Ionicons name={item.icone || 'cash-outline'} size={22} color={item.cor || COLORS.textSoft} />
+              </View>
+              
+              <View style={{ flex: 1, marginLeft: 15 }}>
+                <Text style={{ fontWeight: 'bold', color: COLORS.text, fontSize: 16 }}>
+                  {item.descricao || item.categoria}
+                </Text>
+                <Text style={{ color: COLORS.textSoft, fontSize: 12 }}>
+                  {item.data} • {item.emocional || 'Consciente'}
+                </Text>
+              </View>
+
+              <Text style={{ fontWeight: 'bold', color: COLORS.danger, fontSize: 16 }}>
+                - R$ {item.valor.toFixed(2)}
+              </Text>
+            </View>
+          ))
+        )}
+
+        {/* Espaço extra no final para o botão não tampar o último item ao scrollar */}
+        <View style={{ height: 100 }} /> 
+      </ScrollView>
+
+      {/* BOTÃO FLUTUANTE (FAB) - AGORA FORA DO SCROLLVIEW */}
       <TouchableOpacity 
-        style={styles.fabHome}
+        style={{
+          position: 'absolute',
+          right: 25,
+          bottom: 25,
+          backgroundColor: COLORS.primary,
+          width: 65,
+          height: 65,
+          borderRadius: 32.5,
+          justifyContent: 'center',
+          alignItems: 'center',
+          elevation: 5,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.25,
+          shadowRadius: 3.84,
+        }}
         onPress={() => navigation.navigate('AdicionarGasto')}
       >
-        <Ionicons name="add" size={30} color="#FFF" />
+        <Ionicons name="add" size={35} color="#FFF" />
       </TouchableOpacity>
-      
-      <View style={{ height: 100 }} /> 
-    </ScrollView>
-  );
-}
-// ==========================================
-// ETAPA 4: TELA DE ADICIONAR / EDITAR GASTO
-// ==========================================
-function TelaAdicionarGasto({ route, navigation }) {
-  const { setGastos } = useContext(GastosContext);
-  
-  // Verifica se recebemos um gasto para editar da Tela de Histórico
-  const gastoParaEditar = route.params?.gastoParaEditar;
-
-  // Estados do formulário iniciando com os dados do gasto (se for edição) ou vazios
-  const [descricao, setDescricao] = useState(gastoParaEditar?.descricao || '');
-  const [valor, setValor] = useState(gastoParaEditar?.valor?.toString() || '');
-  const [categoriaSel, setCategoriaSel] = useState(
-    gastoParaEditar 
-      ? CATEGORIAS.find(c => c.nome === gastoParaEditar.categoria) 
-      : CATEGORIAS[0]
-  );
-  const [carregando, setCarregando] = useState(false);
-
-  const salvarGasto = () => {
-    if (!descricao || !valor) {
-      return Alert.alert("Atenção", "Preencha a descrição e o valor.");
-    }
-
-    setCarregando(true);
-
-    const dadosGasto = {
-      id: gastoParaEditar ? gastoParaEditar.id : Math.random().toString(36).substring(7),
-      descricao: descricao,
-      valor: parseFloat(valor.replace(',', '.')),
-      categoria: categoriaSel.nome,
-      icone: categoriaSel.icone,
-      cor: categoriaSel.cor,
-      data: gastoParaEditar ? gastoParaEditar.data : new Date().toLocaleDateString('pt-BR'),
-      emocional: 'Consciente',
-      userId: auth.currentUser?.uid
-    };
-
-    setTimeout(() => {
-      if (gastoParaEditar) {
-        // Lógica de Edição: substitui o item antigo pelo novo na lista
-        setGastos(prev => prev.map(item => item.id === gastoParaEditar.id ? dadosGasto : item));
-      } else {
-        // Lógica de Cadastro: adiciona um novo item à lista
-        setGastos(prev => [...prev, dadosGasto]);
-      }
-      
-      setCarregando(false);
-      Alert.alert("Sucesso", gastoParaEditar ? "Gasto atualizado!" : "Gasto registrado!");
-      navigation.goBack();
-    }, 600);
-  };
-
-  return (
-    <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
-      <Text style={styles.tituloSecao}>
-        {gastoParaEditar ? "Editar Lançamento" : "O que você comprou?"}
-      </Text>
-      
-      <View style={{ marginTop: 20 }}>
-        <Text style={styles.labelInput}>Descrição</Text>
-        <TextInput 
-          placeholder="Ex: Mercado" 
-          style={styles.inputGrande}
-          value={descricao}
-          onChangeText={setDescricao}
-        />
-
-        <Text style={styles.labelInput}>Valor (R$)</Text>
-        <TextInput 
-          placeholder="0,00" 
-          style={styles.inputGrande}
-          keyboardType="numeric"
-          value={valor}
-          onChangeText={setValor}
-        />
-
-        <Text style={styles.labelInput}>Categoria</Text>
-        <View style={styles.gradeCategorias}>
-          {CATEGORIAS.map((cat) => (
-            <TouchableOpacity 
-              key={cat.nome}
-              onPress={() => setCategoriaSel(cat)}
-              style={[
-                styles.itemCategoriaBtn,
-                categoriaSel.nome === cat.nome && { 
-                  borderColor: cat.cor, 
-                  backgroundColor: cat.cor + '15' 
-                }
-              ]}
-            >
-              <Ionicons 
-                name={cat.icone} 
-                size={22} 
-                color={categoriaSel.nome === cat.nome ? cat.cor : COLORS.textSoft} 
-              />
-              <Text style={{ 
-                fontSize: 11, 
-                marginTop: 4,
-                fontWeight: categoriaSel.nome === cat.nome ? 'bold' : 'normal',
-                color: categoriaSel.nome === cat.nome ? cat.cor : COLORS.textSoft 
-              }}>
-                {cat.nome}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <TouchableOpacity 
-          style={[styles.btnPrimario, { marginTop: 30 }]}
-          onPress={salvarGasto}
-          disabled={carregando}
-        >
-          {carregando ? (
-            <ActivityIndicator color="#FFF" />
-          ) : (
-            <Text style={styles.txtBtn}>
-              {gastoParaEditar ? "Atualizar Registro" : "Salvar Gasto"}
-            </Text>
-          )}
-        </TouchableOpacity>
-
-        {gastoParaEditar && (
-          <TouchableOpacity 
-            style={{ marginTop: 15, alignItems: 'center' }}
-            onPress={() => navigation.goBack()}
-          >
-            <Text style={{ color: COLORS.danger }}>Cancelar Edição</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    </ScrollView>
-  );
-}
-// ==========================================
-// ETAPA 5: TELA DE HISTÓRICO (GESTÃO DE DADOS)
-// ==========================================
-function TelaHistorico({ navigation }) {
-  const { gastos, setGastos } = useContext(GastosContext);
-  const dados = gastos || [];
-
-  // Função para deletar um registro com confirmação
-  const confirmarExclusao = (id) => {
-    Alert.alert(
-      "Excluir Registro",
-      "Tem certeza que deseja apagar este gasto?",
-      [
-        { text: "Cancelar", style: "cancel" },
-        { 
-          text: "Excluir", 
-          style: "destructive", 
-          onPress: () => {
-            const novaLista = dados.filter(item => item.id !== id);
-            setGastos(novaLista);
-            // Aqui você chamaria a API deleteDoc do Firebase no futuro
-          } 
-        }
-      ]
-    );
-  };
-
-  return (
-    <View style={styles.container}>
-      <Text style={styles.tituloSecao}>Gerenciar Lançamentos</Text>
-      
-      {dados.length === 0 ? (
-        <View style={styles.areaVazia}>
-          <Ionicons name="receipt-outline" size={50} color={COLORS.border} />
-          <Text style={{ color: COLORS.textSoft, marginTop: 10 }}>Nenhum dado para exibir.</Text>
-        </View>
-      ) : (
-        <FlatList 
-          data={dados.slice().reverse()}
-          keyExtractor={item => item.id}
-          renderItem={({ item }) => (
-            <View style={styles.cardGastoG}>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontWeight: 'bold', color: COLORS.text }}>{item.descricao || item.categoria}</Text>
-                <Text style={{ color: COLORS.textSoft, fontSize: 12 }}>{item.data} • R$ {item.valor.toFixed(2)}</Text>
-              </View>
-
-              {/* Botões de Ação */}
-              <View style={{ flexDirection: 'row', gap: 15 }}>
-                <TouchableOpacity 
-                  onPress={() => navigation.navigate('AdicionarGasto', { gastoParaEditar: item })}
-                >
-                  <Ionicons name="create-outline" size={24} color={COLORS.primary} />
-                </TouchableOpacity>
-
-                <TouchableOpacity onPress={() => confirmarExclusao(item.id)}>
-                  <Ionicons name="trash-outline" size={24} color={COLORS.danger} />
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
-        />
-      )}
     </View>
   );
 }
 // ==========================================
-// ETAPA 6: TELA DE PERFIL COM EDIÇÃO
+// ETAPA 4: TELA DE ADICIONAR GASTO (VERSÃO FINAL CORRIGIDA)
 // ==========================================
-function TelaPerfil() {
-  const { setGastos } = useContext(GastosContext);
-  
-  // Estados para os dados editáveis do perfil (Personalize conforme sua área)
-  const [editando, setEditando] = useState(false);
-  const [nome, setNome] = useState("Albert"); 
-  const [cargo, setCargo] = useState("Desenvolvedor");
-  const [funcao, setFuncao] = useState("Analista de Finanças");
+function TelaAdicionarGasto({ navigation }) {
+  const [descricao, setDescricao] = useState('');
+  const [valorExibicao, setValorExibicao] = useState('');
+  const [valorNumerico, setValorNumerico] = useState(0);
+  const [data, setData] = useState(new Date().toLocaleDateString('pt-BR'));
+  const [categoriaSel, setCategoriaSel] = useState(CATEGORIAS[0]);
+  const [emocional, setEmocional] = useState('Consciente');
+  const [carregando, setCarregando] = useState(false);
 
-  const fazerLogout = () => {
-    Alert.alert(
-      "Sair da Conta", 
-      "Deseja realmente encerrar sua sessão?", 
-      [
-        { text: "Cancelar", style: "cancel" },
-        { 
-          text: "Sair", 
-          style: "destructive", 
-          onPress: () => {
-            signOut(auth)
-              .then(() => {
-                setGastos([]); // Limpa o estado global por segurança
-              })
-              .catch(() => {
-                Alert.alert("Erro", "Não foi possível sair.");
-              });
-          }
-        }
-      ]
-    );
+  const niveisEmocionais = [
+    { nome: 'Necessário', cor: '#4CAF50', icone: 'checkmark-circle' },
+    { nome: 'Consciente', cor: '#2196F3', icone: 'bulb' },
+    { nome: 'Impulsivo', cor: '#FF9800', icone: 'flash' },
+    { nome: 'Arrependido', cor: '#F44336', icone: 'sad' }
+  ];
+
+  const formatarMoeda = (texto) => {
+    let limpo = texto.replace(/\D/g, "");
+    let numero = (Number(limpo) / 100).toFixed(2);
+    if (limpo.length === 0) {
+      setValorExibicao("");
+      setValorNumerico(0);
+      return;
+    }
+    setValorNumerico(parseFloat(numero));
+    setValorExibicao(Number(numero).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }));
   };
 
-  const salvarAlteracoes = () => {
-    setEditando(false);
-    Alert.alert("Sucesso", "Seu perfil foi atualizado!");
+  const salvarGasto = async () => {
+    if (!descricao || valorNumerico <= 0) {
+      return Alert.alert("Atenção", "Preencha a descrição e um valor válido.");
+    }
+
+    setCarregando(true);
+
+    try {
+      // 1. Verificamos se o banco (db) existe antes de tentar
+      if (!db) throw new Error("Banco de dados não inicializado.");
+
+      const novoGasto = {
+        descricao: descricao.trim(),
+        valor: valorNumerico,
+        categoria: categoriaSel.nome,
+        icone: categoriaSel.icone,
+        cor: categoriaSel.cor,
+        data,
+        emocional,
+        userId: auth.currentUser?.uid,
+        criadoEm: serverTimestamp() 
+      };
+
+      await addDoc(collection(db, "gastos"), novoGasto);
+
+      setCarregando(false);
+      
+      // 2. CORREÇÃO DA NAVEGAÇÃO: 
+      // Se o goBack der erro, tentamos navegar para a Home diretamente
+      if (navigation.canGoBack()) {
+        navigation.goBack();
+      } else {
+        navigation.navigate('MainTabs'); // Coloque aqui o nome do seu Navigator principal
+      }
+
+    } catch (error) {
+      setCarregando(false);
+      console.error("Erro API Firestore:", error);
+      Alert.alert("Erro", "Não foi possível conectar ao banco. Tente reiniciar o app.");
+    }
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.containerCentro}>
-      <StatusBar barStyle="dark-content" />
+    <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
+      <Text style={styles.tituloSecao}>O que você comprou?</Text>
+      
+      <Text style={styles.labelInput}>Descrição</Text>
+      <TextInput 
+        placeholder="Ex: Almoço no Shopping" 
+        style={styles.inputGrande}
+        value={descricao}
+        onChangeText={setDescricao}
+      />
 
-      {/* Avatar Dinâmico */}
-      <View style={styles.avatarGrande}>
-        <Text style={{ color: '#FFF', fontSize: 40, fontWeight: 'bold' }}>
-          {nome ? nome[0].toUpperCase() : 'U'}
-        </Text>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+        <View style={{ width: '48%' }}>
+          <Text style={styles.labelInput}>Valor</Text>
+          <TextInput 
+            placeholder="R$ 0,00" 
+            style={styles.inputGrande}
+            keyboardType="numeric"
+            value={valorExibicao}
+            onChangeText={formatarMoeda}
+          />
+        </View>
+        <View style={{ width: '48%' }}>
+          <Text style={styles.labelInput}>Data</Text>
+          <TextInput 
+            placeholder="DD/MM/AAAA" 
+            style={styles.inputGrande}
+            value={data}
+            onChangeText={setData}
+          />
+        </View>
       </View>
 
-      {editando ? (
-        // --- MODO EDIÇÃO ---
-        <View style={{ width: '100%', marginTop: 10 }}>
-          <Text style={styles.labelInput}>Nome Completo</Text>
-          <TextInput 
-            style={styles.inputGrande} 
-            value={nome} 
-            onChangeText={setNome} 
-            placeholder="Seu nome"
-          />
-          
-          <Text style={styles.labelInput}>Cargo / Área</Text>
-          <TextInput 
-            style={styles.inputGrande} 
-            value={cargo} 
-            onChangeText={setCargo} 
-            placeholder="Ex: Estudante"
-          />
-          
-          <Text style={styles.labelInput}>Função Adicional</Text>
-          <TextInput 
-            style={styles.inputGrande} 
-            value={funcao} 
-            onChangeText={setFuncao} 
-            placeholder="Ex: Técnico"
-          />
-
-          <TouchableOpacity style={styles.btnPrimario} onPress={salvarAlteracoes}>
-            <Text style={styles.txtBtn}>Salvar Alterações</Text>
+      <Text style={[styles.labelInput, { marginTop: 15 }]}>Como você se sente sobre esse gasto?</Text>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 }}>
+        {niveisEmocionais.map((nivel) => (
+          <TouchableOpacity 
+            key={nivel.nome}
+            onPress={() => setEmocional(nivel.nome)}
+            style={{
+              width: '23%',
+              paddingVertical: 12,
+              borderRadius: 12,
+              borderWidth: 2,
+              alignItems: 'center',
+              borderColor: emocional === nivel.nome ? nivel.cor : '#F0F0F0',
+              backgroundColor: emocional === nivel.nome ? nivel.cor + '15' : '#FFF',
+            }}
+          >
+            <Ionicons name={nivel.icone} size={18} color={emocional === nivel.nome ? nivel.cor : '#999'} />
+            <Text style={{ fontSize: 9, marginTop: 5, color: emocional === nivel.nome ? nivel.cor : '#999', fontWeight: 'bold' }}>
+              {nivel.nome}
+            </Text>
           </TouchableOpacity>
-          
-          <TouchableOpacity onPress={() => setEditando(false)} style={{ marginTop: 15 }}>
-            <Text style={{ color: COLORS.danger, textAlign: 'center', fontWeight: '600' }}>Cancelar</Text>
+        ))}
+      </View>
+
+      <Text style={styles.labelInput}>Escolha uma Categoria</Text>
+      <View style={styles.gradeCategorias}>
+        {CATEGORIAS.map((cat) => (
+          <TouchableOpacity 
+            key={cat.nome}
+            onPress={() => setCategoriaSel(cat)}
+            style={[
+              styles.itemCategoriaBtn,
+              categoriaSel.nome === cat.nome && { borderColor: cat.cor, backgroundColor: cat.cor + '10' }
+            ]}
+          >
+            <Ionicons name={cat.icone} size={20} color={categoriaSel.nome === cat.nome ? cat.cor : COLORS.textSoft} />
+            <Text style={{ fontSize: 11, color: categoriaSel.nome === cat.nome ? cat.cor : COLORS.textSoft, fontWeight: 'bold' }}>
+              {cat.nome}
+            </Text>
           </TouchableOpacity>
-        </View>
-      ) : (
-        // --- MODO VISUALIZAÇÃO ---
-        <View style={{ alignItems: 'center', width: '100%' }}>
-          <Text style={styles.tituloSecao}>{nome}</Text>
-          <Text style={{ color: COLORS.textSoft, fontSize: 16 }}>{cargo}</Text>
-          <Text style={{ color: COLORS.primary, fontWeight: '600', marginTop: 2 }}>{funcao}</Text>
-          
-          <View style={{ 
-            backgroundColor: COLORS.border + '30', 
-            padding: 8, 
-            borderRadius: 8, 
-            marginTop: 10 
-          }}>
-            <Text style={{ color: COLORS.textSoft, fontSize: 12 }}>{auth.currentUser?.email}</Text>
-          </View>
+        ))}
+      </View>
 
-          <View style={{ width: '100%', marginTop: 35 }}>
-            <TouchableOpacity style={styles.btnOpcaoPerfil} onPress={() => setEditando(true)}>
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Ionicons name="create-outline" size={22} color={COLORS.text} />
-                <Text style={{ marginLeft: 15, color: COLORS.text, fontWeight: '500' }}>Editar Perfil</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.border} />
-            </TouchableOpacity>
+      <TouchableOpacity 
+        style={[styles.btnPrimario, { marginTop: 20 }]} 
+        onPress={salvarGasto} 
+        disabled={carregando}
+      >
+        {carregando ? (
+          <ActivityIndicator color="#FFF" />
+        ) : (
+          <Text style={styles.txtBtn}>Confirmar Lançamento</Text>
+        )}
+      </TouchableOpacity>
 
-            <TouchableOpacity 
-              style={[styles.btnPrimario, { backgroundColor: COLORS.danger, marginTop: 25 }]} 
-              onPress={fazerLogout}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Ionicons name="log-out-outline" size={20} color="#FFF" style={{ marginRight: 10 }} />
-                <Text style={styles.txtBtn}>Sair do Aplicativo</Text>
-              </View>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
+      <TouchableOpacity 
+        style={{ marginTop: 15, alignItems: 'center', marginBottom: 30 }} 
+        onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('MainTabs')}
+      >
+        <Text style={{ color: COLORS.textSoft }}>Cancelar e Voltar</Text>
+      </TouchableOpacity>
     </ScrollView>
   );
 }
 // ==========================================
-// ETAPA 7: NAVEGAÇÃO E MONITOR DE ESTADO
+// ETAPA 5: TELA DE HISTÓRICO (DASHBOARD API) - CORRIGIDO
 // ==========================================
+function TelaHistorico({ navigation }) {
+  const { gastos } = useContext(GastosContext); 
+  
+  const meses = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+  const [mesSelecionado, setMesSelecionado] = useState(new Date().getMonth());
 
+  // 1. Filtragem por Mês
+  const gastosFiltrados = (gastos || []).filter(g => {
+    if (!g.data) return false;
+    const partes = g.data.split('/');
+    return parseInt(partes[1]) - 1 === mesSelecionado;
+  });
+
+  // 2. Lógica do Gráfico
+  const totalMes = gastosFiltrados.reduce((acc, curr) => acc + curr.valor, 0);
+  
+  const dadosGrafico = CATEGORIAS.map(cat => {
+    const totalCat = gastosFiltrados
+      .filter(g => g.categoria === cat.nome)
+      .reduce((acc, curr) => acc + curr.valor, 0);
+    const porcentagem = totalMes > 0 ? (totalCat / totalMes) * 100 : 0;
+    return { ...cat, total: totalCat, porcentagem: parseInt(porcentagem) };
+  }).filter(c => c.total > 0);
+
+  const obterMensagem = () => {
+    if (totalMes === 0) return "Mês limpo! Que tal planejar um novo investimento?";
+    if (totalMes > 1500) return "Opa, os gastos subiram. Analise o que foi impulsivo!";
+    return "Você está no comando do seu dinheiro, Albert!";
+  };
+
+  // 3. EXCLUSÃO REAL NO FIRESTORE
+  const deletarGastoNoBanco = async (id) => {
+    try {
+      await deleteDoc(doc(db, "gastos", id));
+      // Não precisa de Alert aqui, o onSnapshot do App.js atualiza a lista sozinho
+    } catch (error) {
+      console.error("Erro ao deletar:", error);
+      Alert.alert("Erro", "Não foi possível apagar o registro.");
+    }
+  };
+
+  const confirmarExclusao = (id) => {
+    Alert.alert("Excluir", "Deseja apagar este lançamento permanentemente?", [
+      { text: "Cancelar", style: "cancel" },
+      { text: "Apagar", style: "destructive", onPress: () => deletarGastoNoBanco(id) }
+    ]);
+  };
+
+  return (
+    <View style={{ flex: 1, backgroundColor: COLORS.background }}>
+      {/* SELETOR DE MESES */}
+      <View style={{ backgroundColor: '#FFF', paddingVertical: 12, borderBottomWidth: 1, borderColor: COLORS.border }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20 }}>
+          {meses.map((mes, index) => (
+            <TouchableOpacity 
+              key={mes} 
+              onPress={() => setMesSelecionado(index)}
+              style={{
+                paddingHorizontal: 15,
+                paddingVertical: 8,
+                borderRadius: 20,
+                backgroundColor: mesSelecionado === index ? COLORS.primary : '#F5F5F5',
+                marginRight: 10
+              }}
+            >
+              <Text style={{ color: mesSelecionado === index ? '#FFF' : COLORS.textSoft, fontWeight: 'bold' }}>{mes}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+
+      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+        
+        {/* CARD DE MOTIVAÇÃO */}
+        <View style={{ 
+          backgroundColor: COLORS.primary + '10', 
+          padding: 15, borderRadius: 15, borderLeftWidth: 5, borderColor: COLORS.primary,
+          marginBottom: 20, marginTop: 10
+        }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Ionicons name="bulb-outline" size={20} color={COLORS.primary} />
+            <Text style={{ marginLeft: 10, fontSize: 13, color: COLORS.primary, fontWeight: 'bold' }}>CONSCIÊNCIA FINANCEIRA</Text>
+          </View>
+          <Text style={{ color: COLORS.text, marginTop: 5, fontStyle: 'italic' }}>"{obterMensagem()}"</Text>
+        </View>
+
+        {/* DASHBOARD DE CATEGORIAS */}
+        <Text style={styles.tituloSecao}>Análise de {meses[mesSelecionado]}</Text>
+        {gastosFiltrados.length > 0 ? (
+          <View style={{ backgroundColor: '#FFF', padding: 18, borderRadius: 15, marginBottom: 25, borderWidth: 1, borderColor: COLORS.border }}>
+            {dadosGrafico.map(item => (
+              <View key={item.nome} style={{ marginBottom: 15 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '600' }}>{item.nome}</Text>
+                  <Text style={{ fontSize: 12, color: COLORS.textSoft }}>R$ {item.total.toFixed(2)} ({item.porcentagem}%)</Text>
+                </View>
+                {/* Barra de Progresso Dinâmica Corrigida para Mobile */}
+                <View style={{ height: 6, backgroundColor: '#F0F0F0', borderRadius: 3, overflow: 'hidden' }}>
+                  <View style={{ width: `${item.porcentagem}%`, height: '100%', backgroundColor: item.cor }} />
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : (
+          <View style={[styles.areaVazia, { height: 80, marginBottom: 20 }]}>
+              <Text style={{ color: COLORS.textSoft }}>Sem gastos registrados em {meses[mesSelecionado]}.</Text>
+          </View>
+        )}
+
+        {/* LISTAGEM DE LANÇAMENTOS */}
+        <Text style={styles.tituloSecao}>Histórico Detalhado</Text>
+        {gastosFiltrados.map((item) => (
+          <View key={item.id} style={styles.cardGastoG}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontWeight: 'bold', color: COLORS.text, fontSize: 16 }}>{item.descricao}</Text>
+              <Text style={{ fontSize: 12, color: COLORS.textSoft }}>{item.data} • {item.emocional}</Text>
+              <Text style={{ fontWeight: 'bold', color: COLORS.danger, marginTop: 4 }}>- R$ {item.valor.toFixed(2)}</Text>
+            </View>
+            
+            <View style={{ flexDirection: 'row', gap: 15 }}>
+              <TouchableOpacity onPress={() => navigation.navigate('AdicionarGasto', { gastoParaEditar: item })}>
+                <Ionicons name="create-outline" size={24} color={COLORS.primary} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => confirmarExclusao(item.id)}>
+                <Ionicons name="trash-outline" size={24} color={COLORS.danger} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        ))}
+        <View style={{ height: 100 }} />
+      </ScrollView>
+    </View>
+  );
+}
+
+// ==========================================
+// ETAPA 6: TELA DE PERFIL (DADOS PERSISTENTES)
+// ==========================================
+function TelaPerfil() {
+  const { gastos, setGastos, dadosPerfil } = useContext(GastosContext);
+  const user = auth.currentUser;
+  
+  const [editando, setEditando] = useState(false);
+  const [carregando, setCarregando] = useState(false);
+
+  // Estados locais para o formulário de edição
+  const [nome, setNome] = useState(dadosPerfil?.nome || "");
+  const [telefone, setTelefone] = useState(dadosPerfil?.telefone || "");
+  const [cargo, setCargo] = useState(dadosPerfil?.cargo || "");
+  const [email, setEmail] = useState(user?.email || "");
+  const [novaSenha, setNovaSenha] = useState("");
+
+  // Estatísticas Reais
+  const totalLancamentos = gastos?.length || 0;
+  const totalGeral = gastos?.reduce((acc, curr) => acc + (curr.valor || 0), 0) || 0;
+
+  // FUNÇÃO: Salvar tudo (Auth + Firestore)
+  const salvarAlteracoes = async () => {
+    setCarregando(true);
+    try {
+      // 1. Atualiza Dados no Firestore (Nome, Telefone, Cargo)
+      const userRef = doc(db, "usuarios", user.uid);
+      await setDoc(userRef, {
+        nome: nome,
+        telefone: telefone,
+        cargo: cargo,
+        atualizadoEm: new Date()
+      }, { merge: true });
+
+      // 2. Atualiza E-mail no Auth (se mudou)
+      if (email !== user.email) {
+        await updateEmail(user, email);
+      }
+
+      // 3. Atualiza Senha no Auth (se preenchida)
+      if (novaSenha.length >= 6) {
+        await updatePassword(user, novaSenha);
+      }
+
+      Alert.alert("Sucesso", "Perfil atualizado com sucesso!");
+      setEditando(false);
+      setNovaSenha("");
+    } catch (error) {
+      console.error(error);
+      Alert.alert("Erro", "Falha ao atualizar. Se for mudar e-mail ou senha, o Firebase exige que você tenha logado recentemente.");
+    }
+    setCarregando(false);
+  };
+
+  const fazerLogout = () => {
+    Alert.alert("Sair", "Deseja encerrar sua sessão?", [
+      { text: "Cancelar", style: "cancel" },
+      { text: "Sair", style: "destructive", onPress: () => signOut(auth) }
+    ]);
+  };
+
+  return (
+    <View style={{ flex: 1, backgroundColor: '#F8F9FE' }}>
+      <ScrollView showsVerticalScrollIndicator={false}>
+        {/* CABEÇALHO */}
+        <View style={{ backgroundColor: COLORS.primary, height: 160, alignItems: 'center', justifyContent: 'center', borderBottomLeftRadius: 30, borderBottomRightRadius: 30 }}>
+          <View style={{ 
+            width: 100, height: 100, borderRadius: 50, backgroundColor: '#FFF', 
+            justifyContent: 'center', alignItems: 'center', elevation: 10, marginBottom: -80,
+            borderWidth: 4, borderColor: '#F8F9FE'
+          }}>
+            <Text style={{ color: COLORS.primary, fontSize: 40, fontWeight: 'bold' }}>
+              {(dadosPerfil?.nome || "A")[0].toUpperCase()}
+            </Text>
+          </View>
+        </View>
+
+        <View style={{ marginTop: 50, paddingHorizontal: 25, alignItems: 'center' }}>
+          <Text style={{ fontSize: 24, fontWeight: 'bold', color: COLORS.text }}>{dadosPerfil?.nome || "Usuário"}</Text>
+          <Text style={{ color: COLORS.textSoft, fontSize: 14 }}>{dadosPerfil?.cargo || "Membro"} • {user?.email}</Text>
+          
+          {/* CARDS DE RESUMO */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginTop: 25 }}>
+            <View style={{ backgroundColor: '#FFF', padding: 15, borderRadius: 20, width: '48%', alignItems: 'center', elevation: 2 }}>
+              <Text style={{ fontSize: 18, fontWeight: 'bold', color: COLORS.primary }}>{totalLancamentos}</Text>
+              <Text style={{ fontSize: 12, color: COLORS.textSoft }}>Lançamentos</Text>
+            </View>
+            <View style={{ backgroundColor: '#FFF', padding: 15, borderRadius: 20, width: '48%', alignItems: 'center', elevation: 2 }}>
+              <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#4CAF50' }}>R$ {totalGeral.toFixed(0)}</Text>
+              <Text style={{ fontSize: 12, color: COLORS.textSoft }}>Total Gasto</Text>
+            </View>
+          </View>
+
+          {/* LISTA DE OPÇÕES */}
+          <View style={{ width: '100%', marginTop: 30 }}>
+            <TouchableOpacity 
+              onPress={() => {
+                setNome(dadosPerfil.nome || "");
+                setTelefone(dadosPerfil.telefone || "");
+                setCargo(dadosPerfil.cargo || "");
+                setEditando(true);
+              }}
+              style={{ backgroundColor: '#FFF', flexDirection: 'row', alignItems: 'center', padding: 18, borderRadius: 15, marginBottom: 12, elevation: 1 }}
+            >
+              <View style={{ width: 40, height: 40, borderRadius: 10, backgroundColor: COLORS.primary + '15', justifyContent: 'center', alignItems: 'center' }}>
+                <Ionicons name="settings-outline" size={20} color={COLORS.primary} />
+              </View>
+              <Text style={{ flex: 1, marginLeft: 15, fontWeight: '500', color: COLORS.text }}>Configurações da Conta</Text>
+              <Ionicons name="chevron-forward" size={18} color={COLORS.border} />
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              onPress={fazerLogout}
+              style={{ backgroundColor: '#FFF', flexDirection: 'row', alignItems: 'center', padding: 18, borderRadius: 15, marginTop: 10, elevation: 1 }}
+            >
+              <View style={{ width: 40, height: 40, borderRadius: 10, backgroundColor: '#F4433615', justifyContent: 'center', alignItems: 'center' }}>
+                <Ionicons name="log-out-outline" size={20} color="#F44336" />
+              </View>
+              <Text style={{ flex: 1, marginLeft: 15, fontWeight: 'bold', color: '#F44336' }}>Sair do Aplicativo</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </ScrollView>
+
+      {/* MODAL DE EDIÇÃO */}
+      {editando && (
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 20, zIndex: 10 }}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+            <View style={{ backgroundColor: '#FFF', padding: 25, borderRadius: 25, maxHeight: '95%' }}>
+              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                <Text style={{ fontSize: 20, fontWeight: 'bold', marginBottom: 20 }}>Editar Perfil</Text>
+                
+                <Text style={styles.labelInput}>Nome Completo</Text>
+                <TextInput style={styles.inputGrande} value={nome} onChangeText={setNome} />
+                
+                <Text style={styles.labelInput}>Cargo/Função</Text>
+                <TextInput style={styles.inputGrande} value={cargo} onChangeText={setCargo} />
+
+                <Text style={styles.labelInput}>Telefone</Text>
+                <TextInput style={styles.inputGrande} placeholder="(77) 9..." value={telefone} onChangeText={setTelefone} keyboardType="phone-pad" />
+
+                <View style={{ marginVertical: 10, height: 1, backgroundColor: COLORS.border }} />
+
+                <Text style={styles.labelInput}>E-mail (Acesso)</Text>
+                <TextInput style={styles.inputGrande} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
+
+                <Text style={styles.labelInput}>Nova Senha (mín. 6 dígitos)</Text>
+                <TextInput style={styles.inputGrande} placeholder="Deixe em branco para não alterar" value={novaSenha} onChangeText={setNovaSenha} secureTextEntry />
+
+                <TouchableOpacity 
+                  style={[styles.btnPrimario, { marginTop: 20 }]} 
+                  onPress={salvarAlteracoes}
+                  disabled={carregando}
+                >
+                  {carregando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.txtBtn}>Salvar Alterações</Text>}
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={{ marginTop: 15, alignItems: 'center', paddingBottom: 10 }} 
+                  onPress={() => setEditando(false)}
+                >
+                  <Text style={{ color: COLORS.textSoft }}>Cancelar</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      )}
+    </View>
+  );
+}
 // ==========================================
 // ETAPA 7.1: CONFIGURAÇÃO DAS ABAS (TABS)
 // ==========================================
@@ -621,64 +844,136 @@ function MainTabs() {
       <Tab.Screen 
         name="Início" 
         component={TelaHome} 
-        options={{ tabBarIcon: ({color}) => <Ionicons name="home-outline" size={24} color={color}/> }}
+        options={{ 
+          tabBarIcon: ({color}) => <Ionicons name="home-outline" size={24} color={color}/> 
+        }}
       />
       <Tab.Screen 
         name="Histórico" 
         component={TelaHistorico} 
-        options={{ tabBarIcon: ({color}) => <Ionicons name="list-outline" size={24} color={color}/> }}
+        options={{ 
+          tabBarIcon: ({color}) => <Ionicons name="list-outline" size={24} color={color}/> 
+        }}
       />
       <Tab.Screen 
         name="Perfil" 
         component={TelaPerfil} 
-        options={{ tabBarIcon: ({color}) => <Ionicons name="person-outline" size={24} color={color}/> }}
+        options={{ 
+          tabBarIcon: ({color}) => <Ionicons name="person-outline" size={24} color={color}/> 
+        }}
       />
     </Tab.Navigator>
   );
 }
 
 // ==========================================
-// ETAPA 7.2: FUNÇÃO PRINCIPAL DO APLICATIVO
+// ETAPA 7.2: FUNÇÃO PRINCIPAL DO APLICATIVO (APP)
 // ==========================================
 export default function App() {
   const [user, setUser] = useState(null);
   const [carregando, setCarregando] = useState(true);
-  const [gastos, setGastos] = useState([]); // Estado global dos lançamentos
+  const [gastos, setGastos] = useState([]); 
+  const [dadosPerfil, setDadosPerfil] = useState({ nome: 'Albert', telefone: '', cargo: 'Usuário' });
 
-  // Vigia da API - Monitora o estado de login no Firebase
+  // Monitor Global: Login + Gastos + Dados de Perfil
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (usuarioLogado) => {
+    // 1. Monitora se o usuário está logado
+    const unsubscribeAuth = onAuthStateChanged(auth, (usuarioLogado) => {
       setUser(usuarioLogado);
-      setCarregando(false);
+      
+      if (usuarioLogado) {
+        console.log("✅ Conectado como:", usuarioLogado.uid);
+
+        // 2. ESCUTA GASTOS (Sincronização em Tempo Real)
+        const qGastos = query(
+          collection(db, "gastos"),
+          where("userId", "==", usuarioLogado.uid),
+          orderBy("criadoEm", "desc")
+        );
+
+        const unsubscribeGastos = onSnapshot(qGastos, (snapshot) => {
+          const lista = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+          setGastos(lista);
+          console.log("📊 Gastos sincronizados:", lista.length);
+        });
+
+        // 3. ESCUTA PERFIL (Nome, Telefone, Cargo no Firestore)
+        const docRef = doc(db, "usuarios", usuarioLogado.uid);
+        const unsubscribePerfil = onSnapshot(docRef, (docSnap) => {
+          if (docSnap.exists()) {
+            setDadosPerfil(docSnap.data());
+            console.log("👤 Dados de perfil carregados!");
+          }
+        });
+
+        setCarregando(false);
+
+        // Limpeza dos ouvintes ao deslogar ou fechar o app
+        return () => {
+          unsubscribeGastos();
+          unsubscribePerfil();
+        };
+      } else {
+        // Se deslogar, limpa tudo e para o carregamento
+        setGastos([]);
+        setDadosPerfil({ nome: 'Albert', telefone: '', cargo: 'Usuário' });
+        setCarregando(false);
+      }
     });
-    return unsubscribe; 
+
+    return unsubscribeAuth; 
   }, []);
 
-  // Tela de carregamento enquanto o Firebase responde
+  // Tela de Splash / Carregamento Inicial
   if (carregando) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#6200EE" />
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F8F9FE' }}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={{ marginTop: 10, color: COLORS.textSoft }}>Sincronizando com o banco...</Text>
       </View>
     );
   }
 
   return (
-    <GastosContext.Provider value={{ gastos, setGastos }}>
+    // GastosContext agora provê tanto os gastos quanto os dados do perfil para todo o app
+    <GastosContext.Provider value={{ gastos, setGastos, dadosPerfil, setDadosPerfil }}>
       <NavigationContainer>
         <Stack.Navigator screenOptions={{ headerTitleAlign: 'center' }}>
           {user ? (
-            // Grupo de Telas LOGADO
+            // Grupo de Telas para Usuário Logado
             <>
-              <Stack.Screen name="MainTabs" component={MainTabs} options={{ headerShown: false }} />
-              <Stack.Screen name="AdicionarGasto" component={TelaAdicionarGasto} options={{ title: 'Gerenciar Gasto' }} />
+              <Stack.Screen 
+                name="MainTabs" 
+                component={MainTabs} 
+                options={{ headerShown: false }} 
+              />
+              <Stack.Screen 
+                name="AdicionarGasto" 
+                component={TelaAdicionarGasto} 
+                options={{ title: 'Gerenciar Gasto' }} 
+              />
             </>
           ) : (
-            // Grupo de Telas DESLOGADO
+            // Grupo de Telas para Usuário Deslogado
             <>
-              <Stack.Screen name="Login" component={TelaLogin} options={{ headerShown: false }} />
-              <Stack.Screen name="Cadastro" component={TelaCadastro} options={{ title: 'Criar Conta' }} />
-              <Stack.Screen name="EsqueciSenha" component={TelaEsqueciSenha} options={{ title: 'Recuperar Acesso' }} />
+              <Stack.Screen 
+                name="Login" 
+                component={TelaLogin} 
+                options={{ headerShown: false }} 
+              />
+              <Stack.Screen 
+                name="Cadastro" 
+                component={TelaCadastro} 
+                options={{ title: 'Criar Conta' }} 
+              />
+              <Stack.Screen 
+                name="EsqueciSenha" 
+                component={TelaEsqueciSenha} 
+                options={{ title: 'Recuperar Acesso' }} 
+              />
             </>
           )}
         </Stack.Navigator>

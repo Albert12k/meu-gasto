@@ -1,7 +1,9 @@
 import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import { initializeAuth, getReactNativePersistence } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
+// Seus dados reais da imagem
 const firebaseConfig = {
   apiKey: "AIzaSyCOpzBVXGDhOfaWu0NfZMYMrDNDpiW9F80",
   authDomain: "gasto-facil-6ad23.firebaseapp.com",
@@ -12,10 +14,15 @@ const firebaseConfig = {
   measurementId: "G-P79T47W8R5"
 };
 
-// 1. Inicializa o App
+// Inicializa o Firebase
 const app = initializeApp(firebaseConfig);
 
-// 2. Exporta apenas o que funciona no Mobile (Auth e DB)
-// REMOVA as linhas de Analytics que estavam aqui
-export const auth = getAuth(app);
-export const db = getFirestore(app);
+// Inicializa o Auth com persistência para não deslogar sozinho
+const auth = initializeAuth(app, {
+  persistence: getReactNativePersistence(AsyncStorage)
+});
+
+// Inicializa o Banco de Dados (Firestore)
+const db = getFirestore(app);
+
+export { auth, db };
