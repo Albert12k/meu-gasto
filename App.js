@@ -38,6 +38,8 @@ import {
   serverTimestamp 
 } from 'firebase/firestore';
 
+import TelaIA from './TelaIA';
+
 // Inicialização do Contexto Global
 export const GastosContext = createContext();
 
@@ -256,18 +258,99 @@ function TelaEsqueciSenha({ navigation }) {
 // ETAPA 3: TELA DE INÍCIO (HOME) - CORRIGIDA
 // ==========================================
 function TelaHome({ navigation }) {
+  const CATEGORIAS_HOME = [
+    { nome: 'Mercado', icone: 'cart', cor: '#4CAF50' },
+    { nome: 'Lazer', icone: 'beer', cor: '#FF9800' },
+    { nome: 'Transporte', icone: 'car', cor: '#2196F3' },
+    { nome: 'Saúde', icone: 'heart', cor: '#E91E63' },
+    { nome: 'Outros', icone: 'ellipsis-horizontal', cor: '#9E9E9E' }
+  ];
+
   const { gastos } = useContext(GastosContext);
   
+  // --- ESTADOS PARA O REGISTRO RÁPIDO ---
+  const [valorExibicao, setValorExibicao] = useState('');
+  const [valorNumerico, setValorNumerico] = useState(0);
+  const [catRapida, setCatRapida] = useState(CATEGORIAS_HOME[0]); 
+  const [salvandoRapido, setSalvandoRapido] = useState(false);
+
+  // --- 🔥 CORREÇÃO: LIMITES COMEÇAM ZERADOS PARA O GRÁFICO INICIAR LIMPO ---
+  const [limitesCategorias, setLimitesCategorias] = useState({
+    "Mercado": 0,
+    "Lazer": 0,
+    "Transporte": 0,
+    "Saúde": 0,
+    "Outros": 0
+  });
+
+  const [inputsLimites, setInputsLimites] = useState({});
+
   const lista = gastos || []; 
   const totalGasto = lista.reduce((acc, item) => acc + (item.valor || 0), 0);
 
+  // Soma dos gastos reais do Firebase agrupados por categoria
+  const gastosPorCategoria = lista.reduce((acc, item) => {
+    const cat = item.categoria || "Outros";
+    acc[cat] = (acc[cat] || 0) + (item.valor || 0);
+    return acc;
+  }, {});
+
+  const formatarMoedaRapida = (texto) => {
+    let limpo = texto.replace(/\D/g, "");
+    let numero = (Number(limpo) / 100).toFixed(2);
+    if (limpo.length === 0) {
+      setValorExibicao("");
+      setValorNumerico(0);
+      return;
+    }
+    setValorNumerico(parseFloat(numero));
+    setValorExibicao(Number(numero).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }));
+  };
+
+  const lidarSalvarRapido = async () => {
+    if (valorNumerico <= 0) return;
+    setSalvandoRapido(true);
+    try {
+      if (!db) throw new Error("Banco de dados não inicializado.");
+      const novoGastoRapido = {
+        descricao: `Lançamento Rápido (${catRapida.nome})`,
+        valor: valorNumerico,
+        categoria: catRapida.nome,
+        icone: catRapida.icone,
+        cor: catRapida.cor,
+        data: new Date().toLocaleDateString('pt-BR'), 
+        emocional: 'Consciente', 
+        userId: auth.currentUser?.uid,
+        criadoEm: serverTimestamp()
+      };
+      await addDoc(collection(db, "gastos"), novoGastoRapido);
+      setValorExibicao("");
+      setValorNumerico(0);
+      Alert.alert("Sucesso!", "Gasto registrado com sucesso!");
+    } catch (error) {
+      console.error("Erro no registro rápido:", error);
+      Alert.alert("Erro", "Não foi possível fazer o registro rápido.");
+    } finally {
+      setSalvandoRapido(false);
+    }
+  };
+
+  const salvarLimiteDigitado = (categoria) => {
+    const textoDigitado = inputsLimites[categoria] || "";
+    const num = parseFloat(textoDigitado.replace(',', '.'));
+    
+    if (!isNaN(num) && num >= 0) {
+      setLimitesCategorias(prev => ({ ...prev, [categoria]: num }));
+      setInputsLimites(prev => ({ ...prev, [categoria]: '' })); 
+      Alert.alert("Sucesso", `Limite de ${categoria} definido para R$ ${num.toFixed(2)}`);
+    } else {
+      Alert.alert("Erro", "Digite um valor numérico válido.");
+    }
+  };
+
   return (
-    // Usamos uma View flex:1 para permitir que o botão flutue sobre o ScrollView
     <View style={{ flex: 1, backgroundColor: COLORS.background }}>
-      <ScrollView 
-        style={styles.container} 
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView style={styles.container} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <StatusBar barStyle="dark-content" />
         
         {/* Card Principal de Saldo */}
@@ -279,72 +362,209 @@ function TelaHome({ navigation }) {
           <Ionicons name="trending-down" size={40} color="rgba(255,255,255,0.3)" />
         </View>
 
-        {/* Cabeçalho da Seção de Recentes */}
-        <View style={styles.row}>
-          <Text style={styles.tituloSecao}>Atividades Recentes</Text>
-          <TouchableOpacity 
-            style={styles.btnVerTudo} 
-            onPress={() => navigation.navigate('Histórico')}
-          >
-            <Text style={{ color: COLORS.primary, fontWeight: '600' }}>Ver Tudo</Text>
-          </TouchableOpacity>
+        {/* SEÇÃO DE REGISTRO EM 3 SEGUNDOS */}
+        <View style={{
+          backgroundColor: '#FFF',
+          marginHorizontal: 20,
+          marginTop: -10,
+          marginBottom: 15,
+          borderRadius: 16,
+          padding: 15,
+          elevation: 2,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 1 },
+          shadowOpacity: 0.1,
+          shadowRadius: 2,
+        }}>
+          <Text style={{ fontSize: 13, fontWeight: 'bold', color: COLORS.primary, marginBottom: 10 }}>
+            ⚡ Registro em 3 Segundos
+          </Text>
+          
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <TextInput
+              placeholder="R$ 0,00"
+              placeholderTextColor="#999"
+              style={{
+                backgroundColor: '#F5F5F5',
+                paddingHorizontal: 12,
+                paddingVertical: 10,
+                borderRadius: 10,
+                fontSize: 15,
+                fontWeight: 'bold',
+                color: COLORS.text,
+                width: '40%',
+                textAlign: 'center'
+              }}
+              keyboardType="numeric"
+              value={valorExibicao}
+              onChangeText={formatarMoedaRapida}
+              editable={!salvandoRapido}
+            />
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxWidth: '43%', marginHorizontal: 5 }}>
+              {CATEGORIAS_HOME.map((cat) => (
+                <TouchableOpacity
+                  key={cat.nome}
+                  onPress={() => setCatRapida(cat)}
+                  disabled={salvandoRapido}
+                  style={{ 
+                    padding: 8, 
+                    borderRadius: 10, 
+                    backgroundColor: catRapida.nome === cat.nome ? cat.cor + '20' : 'transparent', 
+                    borderWidth: 1.5, 
+                    borderColor: catRapida.nome === cat.nome ? cat.cor : 'transparent', 
+                    marginHorizontal: 3, 
+                    alignItems: 'center', 
+                    justifyContent: 'center' 
+                  }}
+                >
+                  <Ionicons name={cat.icone} size={18} color={catRapida.nome === cat.nome ? cat.cor : '#666'} />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <TouchableOpacity
+              onPress={lidarSalvarRapido}
+              disabled={salvandoRapido || valorNumerico <= 0}
+              style={{ 
+                backgroundColor: valorNumerico <= 0 ? '#E0E0E0' : COLORS.primary, 
+                width: 44, height: 44, borderRadius: 10, justifyContent: 'center', alignItems: 'center', 
+                opacity: salvandoRapido ? 0.7 : 1 
+              }}
+            >
+              {salvandoRapido ? <ActivityIndicator color="#FFF" size="small" /> : <Ionicons name="checkmark" size={22} color="#FFF" />}
+            </TouchableOpacity>
+          </View>
         </View>
 
-        {/* Lista de Últimos 5 Gastos */}
-        {lista.length === 0 ? (
-          <View style={styles.areaVazia}>
-            <Ionicons name="receipt-outline" size={40} color={COLORS.border} />
-            <Text style={{ color: COLORS.textSoft, marginTop: 10 }}>Nenhum gasto encontrado.</Text>
-          </View>
-        ) : (
-          // Inverte a lista para mostrar o mais recente primeiro e pega os 5 primeiros
-          lista.slice().reverse().slice(0, 5).map((item) => (
-            <View key={item.id} style={styles.cardGastoG}>
-              <View style={[styles.miniIconArea, { backgroundColor: (item.cor || '#CCC') + '20' }]}>
-                <Ionicons name={item.icone || 'cash-outline'} size={22} color={item.cor || COLORS.textSoft} />
+        {/* CARD 1 - DEFINIÇÃO DOS LIMITES */}
+        <View style={{
+          backgroundColor: '#FFF',
+          marginHorizontal: 20,
+          marginBottom: 15,
+          borderRadius: 16,
+          padding: 15,
+          elevation: 2,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 1 },
+          shadowOpacity: 0.1,
+          shadowRadius: 2,
+        }}>
+          <Text style={{ fontSize: 13, fontWeight: 'bold', color: COLORS.primary, marginBottom: 12 }}>
+            ⚙️ Definir Alvos de Teto Mensal
+          </Text>
+
+          {CATEGORIAS_HOME.map((cat) => (
+            <View key={cat.nome} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F8FAFC' }}>
+              
+              <View style={{ flexDirection: 'row', alignItems: 'center', width: 105 }}>
+                <Ionicons name={cat.icone} size={16} color={cat.cor} style={{ marginRight: 8, width: 18 }} />
+                <Text style={{ fontSize: 13, fontWeight: '600', color: COLORS.text }}>{cat.nome}</Text>
               </View>
               
-              <View style={{ flex: 1, marginLeft: 15 }}>
-                <Text style={{ fontWeight: 'bold', color: COLORS.text, fontSize: 16 }}>
-                  {item.descricao || item.categoria}
-                </Text>
-                <Text style={{ color: COLORS.textSoft, fontSize: 12 }}>
-                  {item.data} • {item.emocional || 'Consciente'}
-                </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, justifyContent: 'flex-end' }}>
+                <TextInput
+                  placeholder={`R$ ${limitesCategorias[cat.nome].toFixed(0)}`}
+                  placeholderTextColor="#999"
+                  keyboardType="numeric"
+                  value={inputsLimites[cat.nome] || ''}
+                  onChangeText={(texto) => setInputsLimites(prev => ({ ...prev, [cat.nome]: texto }))}
+                  style={{
+                    backgroundColor: '#F1F5F9',
+                    borderRadius: 8,
+                    paddingHorizontal: 12,
+                    height: 38,
+                    fontSize: 13,
+                    width: 110, 
+                    textAlign: 'center',
+                    color: '#1E293B',
+                    marginRight: 8,
+                    fontWeight: '500'
+                  }}
+                />
+                <TouchableOpacity 
+                  onPress={() => salvarLimiteDigitado(cat.nome)}
+                  style={{ backgroundColor: COLORS.primary, borderRadius: 8, height: 38, width: 65, justifyContent: 'center', alignItems: 'center' }}
+                >
+                  <Text style={{ color: '#FFF', fontSize: 12, fontWeight: 'bold' }}>Definir</Text>
+                </TouchableOpacity>
               </View>
-
-              <Text style={{ fontWeight: 'bold', color: COLORS.danger, fontSize: 16 }}>
-                - R$ {item.valor.toFixed(2)}
-              </Text>
             </View>
-          ))
-        )}
+          ))}
+        </View>
 
-        {/* Espaço extra no final para o botão não tampar o último item ao scrollar */}
+        {/* CARD 2 - GRÁFICO DE TERMÔMETROS VERTICAIS */}
+        <View style={{
+          backgroundColor: '#FFF',
+          marginHorizontal: 20,
+          marginBottom: 20,
+          borderRadius: 16,
+          padding: 15,
+          elevation: 2,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 1 },
+          shadowOpacity: 0.1,
+          shadowRadius: 2,
+        }}>
+          <Text style={{ fontSize: 13, fontWeight: 'bold', color: COLORS.primary, marginBottom: 20 }}>
+            📊 Visão Geral dos Termômetros Verticais
+          </Text>
+
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', height: 160, alignItems: 'flex-end', paddingHorizontal: 5 }}>
+            {CATEGORIAS_HOME.map((cat) => {
+              const gastoAtual = gastosPorCategoria[cat.nome] || 0;
+              const limiteMax = limitesCategorias[cat.nome];
+              
+              // 🔥 CALIBRAGEM: Se o limite for maior que 0 calcula a barra. Se for 0, só enche se houver gasto de fato.
+              let porcentagem = 0;
+              if (limiteMax > 0) {
+                porcentagem = Math.min((gastoAtual / limiteMax) * 100, 100);
+              } else if (gastoAtual > 0) {
+                porcentagem = 100; 
+              }
+
+              let corTermometro = '#4CAF50'; 
+              if (gastoAtual > 0 && (limiteMax === 0 || gastoAtual >= limiteMax)) {
+                corTermometro = '#F44336'; 
+              } else if (limiteMax > 0 && gastoAtual >= limiteMax * 0.7) {
+                corTermometro = '#FF9800'; 
+              }
+
+              const legendaCurta = cat.nome.substring(0, 4);
+
+              return (
+                <View key={cat.nome} style={{ alignItems: 'center', flex: 1 }}>
+                  <Text style={{ fontSize: 9, fontWeight: 'bold', color: '#64748B', marginBottom: 4 }}>
+                    {gastoAtual > 0 ? `R$${gastoAtual.toFixed(0)}` : 'R$0'}
+                  </Text>
+
+                  <View style={{ height: 100, width: 22, backgroundColor: '#E2E8F0', borderRadius: 12, justifyContent: 'flex-end', overflow: 'hidden' }}>
+                    <View style={{ height: `${porcentagem}%`, width: '100%', backgroundColor: corTermometro, borderRadius: 12 }} />
+                  </View>
+
+                  <Text style={{ fontSize: 11, fontWeight: '600', color: COLORS.text, marginTop: 8 }}>
+                    {legendaCurta}.
+                  </Text>
+                  
+                  <Text style={{ fontSize: 9, color: COLORS.textSoft, marginTop: 2 }}>
+                    Lim: {limiteMax.toFixed(0)}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+
         <View style={{ height: 100 }} /> 
       </ScrollView>
 
-      {/* BOTÃO FLUTUANTE (FAB) - AGORA FORA DO SCROLLVIEW */}
+      {/* BOTÃO FLUTUANTE EXPANSIVO */}
       <TouchableOpacity 
-        style={{
-          position: 'absolute',
-          right: 25,
-          bottom: 25,
-          backgroundColor: COLORS.primary,
-          width: 65,
-          height: 65,
-          borderRadius: 32.5,
-          justifyContent: 'center',
-          alignItems: 'center',
-          elevation: 5,
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.25,
-          shadowRadius: 3.84,
-        }}
+        style={{ position: 'absolute', right: 20, bottom: 25, backgroundColor: COLORS.primary, paddingHorizontal: 20, paddingVertical: 13, borderRadius: 30, flexDirection: 'row', alignItems: 'center', elevation: 5, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84 }}
         onPress={() => navigation.navigate('AdicionarGasto')}
       >
-        <Ionicons name="add" size={35} color="#FFF" />
+        <Ionicons name="add" size={24} color="#FFF" style={{ marginRight: 6 }} />
+        <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 14 }}>Registro Completo</Text>
       </TouchableOpacity>
     </View>
   );
@@ -353,11 +573,21 @@ function TelaHome({ navigation }) {
 // ETAPA 4: TELA DE ADICIONAR GASTO (VERSÃO FINAL CORRIGIDA)
 // ==========================================
 function TelaAdicionarGasto({ navigation }) {
+  // 🔥 CONSTANTE LOCAL BLINDADA PARA IMPEDIR QUE CONFLITOS OCULTEM A CATEGORIA OUTROS
+  const CATEGORIAS_OFICIAIS = [
+    { nome: 'Mercado', icone: 'cart', cor: '#4CAF50' },
+    { nome: 'Lazer', icone: 'beer', cor: '#FF9800' },
+    { nome: 'Transporte', icone: 'car', cor: '#2196F3' },
+    { nome: 'Saúde', icone: 'heart', cor: '#E91E63' },
+    { nome: 'Outros', icone: 'ellipsis-horizontal', cor: '#9E9E9E' }
+  ];
+
+  const [salvando, setSalvando] = useState(false); 
   const [descricao, setDescricao] = useState('');
   const [valorExibicao, setValorExibicao] = useState('');
   const [valorNumerico, setValorNumerico] = useState(0);
   const [data, setData] = useState(new Date().toLocaleDateString('pt-BR'));
-  const [categoriaSel, setCategoriaSel] = useState(CATEGORIAS[0]);
+  const [categoriaSel, setCategoriaSel] = useState(CATEGORIAS_OFICIAIS[0]); // Aponta direto para o array interno corrigido
   const [emocional, setEmocional] = useState('Consciente');
   const [carregando, setCarregando] = useState(false);
 
@@ -365,7 +595,7 @@ function TelaAdicionarGasto({ navigation }) {
     { nome: 'Necessário', cor: '#4CAF50', icone: 'checkmark-circle' },
     { nome: 'Consciente', cor: '#2196F3', icone: 'bulb' },
     { nome: 'Impulsivo', cor: '#FF9800', icone: 'flash' },
-    { nome: 'Arrependido', cor: '#F44336', icone: 'sad' }
+    { nome: 'Arrehendido', cor: '#F44336', icone: 'sad' }
   ];
 
   const formatarMoeda = (texto) => {
@@ -385,10 +615,9 @@ function TelaAdicionarGasto({ navigation }) {
       return Alert.alert("Atenção", "Preencha a descrição e um valor válido.");
     }
 
-    setCarregando(true);
+    setCarregando(true); 
 
     try {
-      // 1. Verificamos se o banco (db) existe antes de tentar
       if (!db) throw new Error("Banco de dados não inicializado.");
 
       const novoGasto = {
@@ -404,19 +633,16 @@ function TelaAdicionarGasto({ navigation }) {
       };
 
       await addDoc(collection(db, "gastos"), novoGasto);
-
       setCarregando(false);
       
-      // 2. CORREÇÃO DA NAVEGAÇÃO: 
-      // Se o goBack der erro, tentamos navegar para a Home diretamente
       if (navigation.canGoBack()) {
         navigation.goBack();
       } else {
-        navigation.navigate('MainTabs'); // Coloque aqui o nome do seu Navigator principal
+        navigation.navigate('MainTabs'); 
       }
 
     } catch (error) {
-      setCarregando(false);
+      setCarregando(false); 
       console.error("Erro API Firestore:", error);
       Alert.alert("Erro", "Não foi possível conectar ao banco. Tente reiniciar o app.");
     }
@@ -429,9 +655,10 @@ function TelaAdicionarGasto({ navigation }) {
       <Text style={styles.labelInput}>Descrição</Text>
       <TextInput 
         placeholder="Ex: Almoço no Shopping" 
-        style={styles.inputGrande}
+        style={[styles.inputGrande, carregando && { backgroundColor: '#F5F5F5', color: '#999' }]}
         value={descricao}
         onChangeText={setDescricao}
+        editable={!carregando} 
       />
 
       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
@@ -439,19 +666,21 @@ function TelaAdicionarGasto({ navigation }) {
           <Text style={styles.labelInput}>Valor</Text>
           <TextInput 
             placeholder="R$ 0,00" 
-            style={styles.inputGrande}
+            style={[styles.inputGrande, carregando && { backgroundColor: '#F5F5F5', color: '#999' }]}
             keyboardType="numeric"
             value={valorExibicao}
             onChangeText={formatarMoeda}
+            editable={!carregando} 
           />
         </View>
         <View style={{ width: '48%' }}>
           <Text style={styles.labelInput}>Data</Text>
           <TextInput 
             placeholder="DD/MM/AAAA" 
-            style={styles.inputGrande}
+            style={[styles.inputGrande, carregando && { backgroundColor: '#F5F5F5', color: '#999' }]}
             value={data}
             onChangeText={setData}
+            editable={!carregando} 
           />
         </View>
       </View>
@@ -462,6 +691,7 @@ function TelaAdicionarGasto({ navigation }) {
           <TouchableOpacity 
             key={nivel.nome}
             onPress={() => setEmocional(nivel.nome)}
+            disabled={carregando} 
             style={{
               width: '23%',
               paddingVertical: 12,
@@ -470,6 +700,7 @@ function TelaAdicionarGasto({ navigation }) {
               alignItems: 'center',
               borderColor: emocional === nivel.nome ? nivel.cor : '#F0F0F0',
               backgroundColor: emocional === nivel.nome ? nivel.cor + '15' : '#FFF',
+              opacity: carregando ? 0.6 : 1 
             }}
           >
             <Ionicons name={nivel.icone} size={18} color={emocional === nivel.nome ? nivel.cor : '#999'} />
@@ -481,17 +712,22 @@ function TelaAdicionarGasto({ navigation }) {
       </View>
 
       <Text style={styles.labelInput}>Escolha uma Categoria</Text>
-      <View style={styles.gradeCategorias}>
-        {CATEGORIAS.map((cat) => (
+      
+      {/* 🛠️ ALINHAMENTO IMPEDINDO SUMIÇO: Garante estrutura flex inline controlando as quebras das duas colunas */}
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginVertical: 10 }}>
+        {CATEGORIAS_OFICIAIS.map((cat) => (
           <TouchableOpacity 
             key={cat.nome}
             onPress={() => setCategoriaSel(cat)}
+            disabled={carregando} 
             style={[
               styles.itemCategoriaBtn,
-              categoriaSel.nome === cat.nome && { borderColor: cat.cor, backgroundColor: cat.cor + '10' }
+              { width: '48%', flexDirection: 'row', alignItems: 'center', marginBottom: 12, paddingVertical: 12, paddingHorizontal: 12, borderWidth: 1.5, borderRadius: 12 },
+              categoriaSel.nome === cat.nome ? { borderColor: cat.cor, backgroundColor: cat.cor + '10' } : { borderColor: '#F0F0F0', backgroundColor: '#FFF' },
+              carregando && { opacity: 0.6 } 
             ]}
           >
-            <Ionicons name={cat.icone} size={20} color={categoriaSel.nome === cat.nome ? cat.cor : COLORS.textSoft} />
+            <Ionicons name={cat.icone} size={20} color={categoriaSel.nome === cat.nome ? cat.cor : COLORS.textSoft} style={{ marginRight: 8 }} />
             <Text style={{ fontSize: 11, color: categoriaSel.nome === cat.nome ? cat.cor : COLORS.textSoft, fontWeight: 'bold' }}>
               {cat.nome}
             </Text>
@@ -499,13 +735,18 @@ function TelaAdicionarGasto({ navigation }) {
         ))}
       </View>
 
+      {/* Botão Principal Blindado */}
       <TouchableOpacity 
-        style={[styles.btnPrimario, { marginTop: 20 }]} 
+        style={[
+          styles.btnPrimario, 
+          { marginTop: 20 }, 
+          carregando && { backgroundColor: '#A0A0A0', opacity: 0.8 } 
+        ]} 
         onPress={salvarGasto} 
-        disabled={carregando}
+        disabled={carregando} 
       >
         {carregando ? (
-          <ActivityIndicator color="#FFF" />
+          <ActivityIndicator color="#FFF" size="small" />
         ) : (
           <Text style={styles.txtBtn}>Confirmar Lançamento</Text>
         )}
@@ -513,9 +754,10 @@ function TelaAdicionarGasto({ navigation }) {
 
       <TouchableOpacity 
         style={{ marginTop: 15, alignItems: 'center', marginBottom: 30 }} 
-        onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('MainTabs')}
+        onPress={() => !carregando && (navigation.canGoBack() ? navigation.goBack() : navigation.navigate('MainTabs'))}
+        disabled={carregando} 
       >
-        <Text style={{ color: COLORS.textSoft }}>Cancelar e Voltar</Text>
+        <Text style={{ color: carregando ? '#CCC' : COLORS.textSoft }}>Cancelar e Voltar</Text>
       </TouchableOpacity>
     </ScrollView>
   );
@@ -848,6 +1090,17 @@ function MainTabs() {
           tabBarIcon: ({color}) => <Ionicons name="home-outline" size={24} color={color}/> 
         }}
       />
+      
+      {/* 🔥 NOVA ABA: ASSISTENTE DE IA COMPORTAMENTAL */}
+      <Tab.Screen 
+        name="Assistente IA" 
+        component={TelaIA} 
+        options={{ 
+          tabBarIcon: ({color}) => <Ionicons name="hardware-chip-outline" size={24} color={color}/>,
+          headerTitle: "Gasto Fácil AI"
+        }}
+      />
+
       <Tab.Screen 
         name="Histórico" 
         component={TelaHistorico} 
@@ -855,6 +1108,7 @@ function MainTabs() {
           tabBarIcon: ({color}) => <Ionicons name="list-outline" size={24} color={color}/> 
         }}
       />
+      
       <Tab.Screen 
         name="Perfil" 
         component={TelaPerfil} 
@@ -873,9 +1127,12 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [carregando, setCarregando] = useState(true);
   const [gastos, setGastos] = useState([]); 
+  // 🔥 NOVO: Estados Globais para os Ganhos persistirem sem resetar
+  const [ganhos, setGanhos] = useState([]);
+  const [carregandoGanhos, setCarregandoGanhos] = useState(true);
   const [dadosPerfil, setDadosPerfil] = useState({ nome: 'Albert', telefone: '', cargo: 'Usuário' });
 
-  // Monitor Global: Login + Gastos + Dados de Perfil
+  // Monitor Global: Login + Gastos + Ganhos + Dados de Perfil
   useEffect(() => {
     // 1. Monitora se o usuário está logado
     const unsubscribeAuth = onAuthStateChanged(auth, (usuarioLogado) => {
@@ -900,7 +1157,28 @@ export default function App() {
           console.log("📊 Gastos sincronizados:", lista.length);
         });
 
-        // 3. ESCUTA PERFIL (Nome, Telefone, Cargo no Firestore)
+        // 🔥 3. NOVO: ESCUTA GANHOS (Sincronização em Tempo Real sem reset)
+        const qGanhos = query(
+          collection(db, "ganhos"),
+          where("userId", "==", usuarioLogado.uid)
+        );
+
+        const unsubscribeGanhos = onSnapshot(qGanhos, (snapshot) => {
+          const listaGanhosCarregados = snapshot.docs.map(docSnap => ({
+            id: docSnap.id,
+            ...docSnap.data()
+          }));
+          // Ordena de forma reativa pelo tempo
+          listaGanhosCarregados.sort((a, b) => (b.sortTime || 0) - (a.sortTime || 0));
+          setGanhos(listaGanhosCarregados);
+          setCarregandoGanhos(false);
+          console.log("💸 Ganhos sincronizados:", listaGanhosCarregados.length);
+        }, (error) => {
+          console.error("Erro ao escutar ganhos:", error);
+          setCarregandoGanhos(false);
+        });
+
+        // 4. ESCUTA PERFIL (Nome, Telefone, Cargo no Firestore)
         const docRef = doc(db, "usuarios", usuarioLogado.uid);
         const unsubscribePerfil = onSnapshot(docRef, (docSnap) => {
           if (docSnap.exists()) {
@@ -911,21 +1189,47 @@ export default function App() {
 
         setCarregando(false);
 
-        // Limpeza dos ouvintes ao deslogar ou fechar o app
+        // Limpeza de todos os ouvintes ao deslogar ou fechar o app
         return () => {
           unsubscribeGastos();
+          unsubscribeGanhos(); // 🔥 Desliga o monitor de ganhos
           unsubscribePerfil();
         };
       } else {
-        // Se deslogar, limpa tudo e para o carregamento
+        // Se deslogar, limpa todo o cache de estados globais
         setGastos([]);
+        setGanhos([]); // 🔥 Zera o estado local ao deslogar
         setDadosPerfil({ nome: 'Albert', telefone: '', cargo: 'Usuário' });
+        setCarregandoGanhos(true);
         setCarregando(false);
       }
     });
 
     return unsubscribeAuth; 
   }, []);
+
+  // 🔥 5. NOVO: FUNÇÕES DE MUTABILIDADE DOS GANHOS NO CLOUD FIRESTORE
+  const adicionarGanhoGlobal = async (valor) => {
+    if (!auth.currentUser) return;
+    const novoGanho = {
+      valor: valor,
+      data: new Date().toLocaleDateString('pt-BR'),
+      sortTime: Date.now(),
+      userId: auth.currentUser.uid,
+      criadoEm: serverTimestamp() 
+    };
+    await addDoc(collection(db, "ganhos"), novoGanho);
+  };
+
+  const editarGanhoGlobal = async (id, novoValor) => {
+    const ganhoRef = doc(db, "ganhos", id);
+    await updateDoc(ganhoRef, { valor: novoValor });
+  };
+
+  const excluirGanhoGlobal = async (id) => {
+    const ganhoRef = doc(db, "ganhos", id);
+    await deleteDoc(ganhoRef);
+  };
 
   // Tela de Splash / Carregamento Inicial
   if (carregando) {
@@ -938,12 +1242,21 @@ export default function App() {
   }
 
   return (
-    // GastosContext agora provê tanto os gastos quanto os dados do perfil para todo o app
-    <GastosContext.Provider value={{ gastos, setGastos, dadosPerfil, setDadosPerfil }}>
+    // 🔥 6. CONTEXT VALUE ATUALIZADO: Distribuindo dados e funções operacionais de Ganhos para o app inteiro
+    <GastosContext.Provider value={{ 
+      gastos, 
+      setGastos, 
+      ganhos, 
+      carregandoGanhos, 
+      dadosPerfil, 
+      setDadosPerfil,
+      adicionarGanhoGlobal,
+      editarGanhoGlobal,
+      excluirGanhoGlobal
+    }}>
       <NavigationContainer>
         <Stack.Navigator screenOptions={{ headerTitleAlign: 'center' }}>
           {user ? (
-            // Grupo de Telas para Usuário Logado
             <>
               <Stack.Screen 
                 name="MainTabs" 
@@ -957,7 +1270,6 @@ export default function App() {
               />
             </>
           ) : (
-            // Grupo de Telas para Usuário Deslogado
             <>
               <Stack.Screen 
                 name="Login" 

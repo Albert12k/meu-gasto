@@ -1,9 +1,10 @@
 import { initializeApp } from "firebase/app";
-import { initializeAuth, getReactNativePersistence } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { initializeAuth, getReactNativePersistence, getAuth } from "firebase/auth";
+// Alteramos aqui para importar o inicializador de cache offline do Firestore
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Platform } from "react-native"; 
 
-// Seus dados reais da imagem
 const firebaseConfig = {
   apiKey: "AIzaSyCOpzBVXGDhOfaWu0NfZMYMrDNDpiW9F80",
   authDomain: "gasto-facil-6ad23.firebaseapp.com",
@@ -17,12 +18,21 @@ const firebaseConfig = {
 // Inicializa o Firebase
 const app = initializeApp(firebaseConfig);
 
-// Inicializa o Auth com persistência para não deslogar sozinho
-const auth = initializeAuth(app, {
-  persistence: getReactNativePersistence(AsyncStorage)
-});
+// 1. Correção da Autenticação (Web vs Celular) para evitar tela branca
+let auth;
+if (Platform.OS === 'web') {
+  auth = getAuth(app);
+} else {
+  auth = initializeAuth(app, {
+    persistence: getReactNativePersistence(AsyncStorage)
+  });
+}
 
-// Inicializa o Banco de Dados (Firestore)
-const db = getFirestore(app);
+// 2. Melhoria de Robustez: Inicializa o Firestore com Cache Offline Ativado
+const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager() // Funciona tanto no Chrome quanto no celular
+  })
+});
 
 export { auth, db };
