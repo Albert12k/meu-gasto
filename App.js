@@ -40,6 +40,9 @@ import {
 
 import TelaIA from './TelaIA';
 
+import { LogBox } from 'react-native';
+LogBox.ignoreLogs(['@firebase/firestore: Firestore']);
+
 // Inicialização do Contexto Global
 export const GastosContext = createContext();
 
@@ -572,8 +575,12 @@ function TelaHome({ navigation }) {
 // ==========================================
 // ETAPA 4: TELA DE ADICIONAR GASTO (VERSÃO FINAL CORRIGIDA)
 // ==========================================
-function TelaAdicionarGasto({ navigation }) {
-  // 🔥 CONSTANTE LOCAL BLINDADA PARA IMPEDIR QUE CONFLITOS OCULTEM A CATEGORIA OUTROS
+function TelaAdicionarGasto({ route, navigation }) { // 🔥 Adicionado o 'route' aqui nos parâmetros
+  
+  // 🔥 Importando a função de edição global que criamos no seu App.js
+  const { editarGastoGlobal } = useContext(GastosContext);
+
+  // CONSTANTE LOCAL BLINDADA PARA IMPEDIR QUE CONFLITOS OCULTEM A CATEGORIA OUTROS
   const CATEGORIAS_OFICIAIS = [
     { nome: 'Mercado', icone: 'cart', cor: '#4CAF50' },
     { nome: 'Lazer', icone: 'beer', cor: '#FF9800' },
@@ -582,14 +589,17 @@ function TelaAdicionarGasto({ navigation }) {
     { nome: 'Outros', icone: 'ellipsis-horizontal', cor: '#9E9E9E' }
   ];
 
-  const [salvando, setSalvando] = useState(false); 
   const [descricao, setDescricao] = useState('');
   const [valorExibicao, setValorExibicao] = useState('');
   const [valorNumerico, setValorNumerico] = useState(0);
   const [data, setData] = useState(new Date().toLocaleDateString('pt-BR'));
-  const [categoriaSel, setCategoriaSel] = useState(CATEGORIAS_OFICIAIS[0]); // Aponta direto para o array interno corrigido
+  const [categoriaSel, setCategoriaSel] = useState(CATEGORIAS_OFICIAIS[0]); 
   const [emocional, setEmocional] = useState('Consciente');
   const [carregando, setCarregando] = useState(false);
+
+  // 🔥 ESTADOS DE CONTROLE: Para diferenciar se é um novo gasto ou uma edição
+  const [isEditando, setIsEditando] = useState(false);
+  const [gastoId, setGastoId] = useState(null);
 
   const niveisEmocionais = [
     { nome: 'Necessário', cor: '#4CAF50', icone: 'checkmark-circle' },
@@ -597,6 +607,38 @@ function TelaAdicionarGasto({ navigation }) {
     { nome: 'Impulsivo', cor: '#FF9800', icone: 'flash' },
     { nome: 'Arrehendido', cor: '#F44336', icone: 'sad' }
   ];
+
+  // 🔥 DETECTOR DE ENTRADA: Se houver dados passados no clique do histórico, preenche tudo na hora!
+  useEffect(() => {
+    if (route.params?.gastoParaEditar) {
+      const gasto = route.params.gastoParaEditar;
+      
+      setIsEditando(true);
+      setGastoId(gasto.id);
+
+      // Preenchendo todos os inputs textuais e numéricos
+      setDescricao(gasto.descricao || '');
+      setValorNumerico(gasto.valor || 0);
+      setData(gasto.data || new Date().toLocaleDateString('pt-BR'));
+      setEmocional(gasto.emocional || 'Consciente');
+
+      // Formata a string de moeda para carregar no input "R$ X,XX" de forma nativa
+      if (gasto.valor) {
+        setValorExibicao(
+          Number(gasto.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+        );
+      }
+
+      // Encontra o objeto da categoria correspondente para deixar o botão marcado
+      const categoriaSalva = CATEGORIAS_OFICIAIS.find(c => c.nome === gasto.categoria);
+      if (categoriaSalva) {
+        setCategoriaSel(categoriaSalva);
+      } else {
+        // Fallback para a categoria Outros se não achar o match
+        setCategoriaSel(CATEGORIAS_OFICIAIS[4]);
+      }
+    }
+  }, [route.params?.gastoParaEditar]);
 
   const formatarMoeda = (texto) => {
     let limpo = texto.replace(/\D/g, "");
@@ -620,19 +662,27 @@ function TelaAdicionarGasto({ navigation }) {
     try {
       if (!db) throw new Error("Banco de dados não inicializado.");
 
-      const novoGasto = {
-        descricao: descricao.trim(),
-        valor: valorNumerico,
-        categoria: categoriaSel.nome,
-        icone: categoriaSel.icone,
-        cor: categoriaSel.cor,
-        data,
-        emocional,
-        userId: auth.currentUser?.uid,
-        criadoEm: serverTimestamp() 
-      };
+      if (isEditando) {
+        // 🔥 MUDANÇA OPERACIONAL: Se for edição, executa a substituição reativa no Firebase
+        await editarGastoGlobal(gastoId, valorNumerico);
+        Alert.alert("Sucesso", "O lançamento foi atualizado!");
+      } else {
+        // Se for um gasto normal do zero, cria o documento normalmente
+        const novoGasto = {
+          descricao: descricao.trim(),
+          valor: valorNumerico,
+          categoria: categoriaSel.nome,
+          icone: categoriaSel.icone,
+          cor: categoriaSel.cor,
+          data,
+          emocional,
+          userId: auth.currentUser?.uid,
+          criadoEm: serverTimestamp() 
+        };
+        await addDoc(collection(db, "gastos"), novoGasto);
+        Alert.alert("Sucesso", "Novo gasto registrado!");
+      }
 
-      await addDoc(collection(db, "gastos"), novoGasto);
       setCarregando(false);
       
       if (navigation.canGoBack()) {
@@ -650,7 +700,10 @@ function TelaAdicionarGasto({ navigation }) {
 
   return (
     <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
-      <Text style={styles.tituloSecao}>O que você comprou?</Text>
+      {/* Título dinâmico para dar feedback visual */}
+      <Text style={styles.tituloSecao}>
+        {isEditando ? "✏️ Modificar o seu Gasto" : "O que você comprou?"}
+      </Text>
       
       <Text style={styles.labelInput}>Descrição</Text>
       <TextInput 
@@ -713,7 +766,6 @@ function TelaAdicionarGasto({ navigation }) {
 
       <Text style={styles.labelInput}>Escolha uma Categoria</Text>
       
-      {/* 🛠️ ALINHAMENTO IMPEDINDO SUMIÇO: Garante estrutura flex inline controlando as quebras das duas colunas */}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginVertical: 10 }}>
         {CATEGORIAS_OFICIAIS.map((cat) => (
           <TouchableOpacity 
@@ -735,7 +787,7 @@ function TelaAdicionarGasto({ navigation }) {
         ))}
       </View>
 
-      {/* Botão Principal Blindado */}
+      {/* Botão Principal Dinâmico */}
       <TouchableOpacity 
         style={[
           styles.btnPrimario, 
@@ -748,7 +800,9 @@ function TelaAdicionarGasto({ navigation }) {
         {carregando ? (
           <ActivityIndicator color="#FFF" size="small" />
         ) : (
-          <Text style={styles.txtBtn}>Confirmar Lançamento</Text>
+          <Text style={styles.txtBtn}>
+            {isEditando ? "Confirmar Alterações" : "Confirmar Lançamento"}
+          </Text>
         )}
       </TouchableOpacity>
 
@@ -763,8 +817,8 @@ function TelaAdicionarGasto({ navigation }) {
   );
 }
 // ==========================================
-// ETAPA 5: TELA DE HISTÓRICO (DASHBOARD API) - CORRIGIDO
-// ==========================================
+// ETAPA 5: TELA DE HISTÓRICO (DASHBOARD API) - COM EDIÇÃO DIRETA INTEGRADA
+// =========================================================================
 function TelaHistorico({ navigation }) {
   const { gastos } = useContext(GastosContext); 
   
@@ -789,7 +843,7 @@ function TelaHistorico({ navigation }) {
     return { ...cat, total: totalCat, porcentagem: parseInt(porcentagem) };
   }).filter(c => c.total > 0);
 
-  const obterMensagem = () => {
+  const obterMensagem = () => { 
     if (totalMes === 0) return "Mês limpo! Que tal planejar um novo investimento?";
     if (totalMes > 1500) return "Opa, os gastos subiram. Analise o que foi impulsivo!";
     return "Você está no comando do seu dinheiro, Albert!";
@@ -799,7 +853,6 @@ function TelaHistorico({ navigation }) {
   const deletarGastoNoBanco = async (id) => {
     try {
       await deleteDoc(doc(db, "gastos", id));
-      // Não precisa de Alert aqui, o onSnapshot do App.js atualiza a lista sozinho
     } catch (error) {
       console.error("Erro ao deletar:", error);
       Alert.alert("Erro", "Não foi possível apagar o registro.");
@@ -836,7 +889,7 @@ function TelaHistorico({ navigation }) {
         </ScrollView>
       </View>
 
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.container} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         
         {/* CARD DE MOTIVAÇÃO */}
         <View style={{ 
@@ -861,7 +914,6 @@ function TelaHistorico({ navigation }) {
                   <Text style={{ fontSize: 13, fontWeight: '600' }}>{item.nome}</Text>
                   <Text style={{ fontSize: 12, color: COLORS.textSoft }}>R$ {item.total.toFixed(2)} ({item.porcentagem}%)</Text>
                 </View>
-                {/* Barra de Progresso Dinâmica Corrigida para Mobile */}
                 <View style={{ height: 6, backgroundColor: '#F0F0F0', borderRadius: 3, overflow: 'hidden' }}>
                   <View style={{ width: `${item.porcentagem}%`, height: '100%', backgroundColor: item.cor }} />
                 </View>
@@ -884,7 +936,8 @@ function TelaHistorico({ navigation }) {
               <Text style={{ fontWeight: 'bold', color: COLORS.danger, marginTop: 4 }}>- R$ {item.valor.toFixed(2)}</Text>
             </View>
             
-            <View style={{ flexDirection: 'row', gap: 15 }}>
+            <View style={{ flexDirection: 'row', gap: 15, alignItems: 'center' }}>
+              {/* 🔥 ADAPTADO: Agora navega direto para a tela de adicionar levando o objeto do gasto completo */}
               <TouchableOpacity onPress={() => navigation.navigate('AdicionarGasto', { gastoParaEditar: item })}>
                 <Ionicons name="create-outline" size={24} color={COLORS.primary} />
               </TouchableOpacity>
@@ -899,7 +952,6 @@ function TelaHistorico({ navigation }) {
     </View>
   );
 }
-
 // ==========================================
 // ETAPA 6: TELA DE PERFIL (DADOS PERSISTENTES)
 // ==========================================
@@ -1231,6 +1283,12 @@ export default function App() {
     await deleteDoc(ganhoRef);
   };
 
+  // 🔥 NOVA FUNÇÃO INSERIDA: Permite editar os gastos do histórico de qualquer mês por substituição
+  const editarGastoGlobal = async (id, novoValor) => {
+    const gastoRef = doc(db, "gastos", id);
+    await updateDoc(gastoRef, { valor: novoValor });
+  };
+
   // Tela de Splash / Carregamento Inicial
   if (carregando) {
     return (
@@ -1242,7 +1300,7 @@ export default function App() {
   }
 
   return (
-    // 🔥 6. CONTEXT VALUE ATUALIZADO: Distribuindo dados e funções operacionais de Ganhos para o app inteiro
+    // 🔥 6. CONTEXT VALUE ATUALIZADO: repassando 'editarGastoGlobal' junto com os outros dados
     <GastosContext.Provider value={{ 
       gastos, 
       setGastos, 
@@ -1252,7 +1310,8 @@ export default function App() {
       setDadosPerfil,
       adicionarGanhoGlobal,
       editarGanhoGlobal,
-      excluirGanhoGlobal
+      excluirGanhoGlobal,
+      editarGastoGlobal // 🔥 Pronto para o histórico usar
     }}>
       <NavigationContainer>
         <Stack.Navigator screenOptions={{ headerTitleAlign: 'center' }}>

@@ -13,7 +13,7 @@ const COLORS = {
 };
 
 export default function TelaIA() {
-  // 🔥 LENDO TUDO DO CONTEXTO GLOBAL DO APP.JS (Sem states locais de armazenamento)
+  // LENDO TUDO DO CONTEXTO GLOBAL DO APP.JS (Sem states locais de armazenamento)
   const { 
     gastos, 
     ganhos, 
@@ -28,6 +28,9 @@ export default function TelaIA() {
 
   const [inputGanho, setInputGanho] = useState('');
   const [dicaIA, setDicaIA] = useState("");
+  
+  // 🔥 OPÇÃO 2: Estado de controle para evitar duplo clique ao salvar ganho
+  const [salvandoGanho, setSalvandoGanho] = useState(false);
 
   // --- ESTADOS DO CHAT INTERATIVO ---
   const [mensagemUsuario, setMensagemUsuario] = useState('');
@@ -45,16 +48,18 @@ export default function TelaIA() {
   const barraGanho = totalMovimentado > 0 ? (totalGanhos / totalMovimentado) * 100 : 50;
   const barraGasto = totalMovimentado > 0 ? (totalGasto / totalMovimentado) * 100 : 50;
 
-  // --- EXTRATO AUTOMÁTICO UNIFICADO ---
+  // --- 🔥 OPÇÃO 3: EXTRATO REATIVO ORDENADO CRONOLOGICAMENTE PELO TIMESTAMP DO FIREBASE ---
   const historicoUnificado = [
-    ...listaGanhos.map(g => ({ 
-      id: g.id, tipo: 'ganho', descricao: 'Receita Declarada', data: g.data, valor: g.valor, cor: '#2E7D32', icone: 'arrow-up-circle', sortTime: g.sortTime 
-    })),
+    ...listaGanhos.map(g => {
+      const tempoGanho = g.criadoEm?.seconds ? g.criadoEm.seconds * 1000 : (g.sortTime || 0);
+      return { 
+        id: g.id, tipo: 'ganho', descricao: 'Receita Declarada', data: g.data, valor: g.valor, cor: '#2E7D32', icone: 'arrow-up-circle', sortTime: tempoGanho 
+      };
+    }),
     ...listaGastos.map(g => {
-      const partes = (g.data || "").split('/');
-      const timestampGasto = partes.length === 3 ? new Date(partes[2], partes[1] - 1, partes[0]).getTime() : 0;
+      const tempoGasto = g.criadoEm?.seconds ? g.criadoEm.seconds * 1000 : 0;
       return {
-        id: g.id, tipo: 'gasto', descricao: g.descricao || g.categoria || 'Gasto Registrado', data: g.data, emocional: g.emocional, valor: g.valor || 0, cor: '#C62828', icone: g.icone || 'arrow-down-circle', sortTime: timestampGasto
+        id: g.id, tipo: 'gasto', descricao: g.descricao || g.categoria || 'Gasto Registrado', data: g.data, emocional: g.emocional, valor: g.valor || 0, cor: '#C62828', icone: g.icone || 'arrow-down-circle', sortTime: tempoGasto
       };
     })
   ].sort((a, b) => b.sortTime - a.sortTime);
@@ -80,23 +85,26 @@ export default function TelaIA() {
     }
   }, [gastos, listaGanhos]);
 
-  // Lidar com envio de novos Ganhos via Contexto
+  // 🔥 OPÇÃO 2: Envio de novos Ganhos com trava de requisição
   const lidarAdicionarGanho = async () => {
     const valor = parseFloat(inputGanho.replace(',', '.'));
     if (!isNaN(valor) && valor > 0) {
+      setSalvandoGanho(true); // Bloqueia clicks extras
       try {
         await adicionarGanhoGlobal(valor);
         setInputGanho('');
         Alert.alert("Sucesso", "Ganho registrado globalmente!");
       } catch (err) {
         Alert.alert("Erro", "Não foi possível adicionar o ganho.");
+      } finally {
+        setSalvandoGanho(false); // Libera o botão
       }
     } else {
       Alert.alert("Erro", "Digite um valor válido.");
     }
   };
 
-  // 🔥 MENU DE ALTERAÇÃO EXCLUSIVO PARA GANHOS (EDITAR OU DELETAR)
+  // MENU DE ALTERAÇÃO EXCLUSIVO PARA GANHOS (EDITAR OU DELETAR)
   const abrirGerenciadorGanho = (item) => {
     Alert.alert(
       "Gerenciar Receita",
@@ -177,10 +185,19 @@ export default function TelaIA() {
             keyboardType="numeric"
             value={inputGanho}
             onChangeText={setInputGanho}
+            editable={!salvandoGanho} // Trava o campo enquanto salva
             style={styles.inputGanhos}
           />
-          <TouchableOpacity onPress={lidarAdicionarGanho} style={styles.btnApp}>
-            <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 13 }}>Adicionar</Text>
+          <TouchableOpacity 
+            onPress={lidarAdicionarGanho} 
+            disabled={salvandoGanho || !inputGanho} // Desabilita clique extra
+            style={[styles.btnApp, (salvandoGanho || !inputGanho) && { backgroundColor: '#A5B4FC' }]}
+          >
+            {salvandoGanho ? (
+              <ActivityIndicator color="#FFF" size="small" />
+            ) : (
+              <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 13 }}>Adicionar</Text>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -297,7 +314,7 @@ const styles = StyleSheet.create({
   cardInputGanho: { backgroundColor: '#FFF', padding: 15, borderRadius: 14, marginBottom: 15, elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
   labelGanho: { fontSize: 13, fontWeight: '600', color: '#475569' },
   inputGanhos: { flex: 1, backgroundColor: '#F1F5F9', borderRadius: 8, paddingHorizontal: 12, height: 40, fontSize: 14, color: '#1E293B' },
-  btnApp: { backgroundColor: '#4F46E5', borderRadius: 8, paddingHorizontal: 15, justifyContent: 'center', marginLeft: 8, height: 40 },
+  btnApp: { backgroundColor: '#4F46E5', borderRadius: 8, paddingHorizontal: 15, justifyContent: 'center', marginLeft: 8, height: 40, minWidth: 80, alignItems: 'center' },
   cardGrafico: { backgroundColor: '#FFF', padding: 16, borderRadius: 14, marginBottom: 15, elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
   tituloSecao: { fontSize: 15, fontWeight: 'bold', color: '#1E293B', marginBottom: 5 },
   rowValores: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
