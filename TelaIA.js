@@ -1,5 +1,6 @@
 import React, { useContext, useState, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, ActivityIndicator } from 'react-native';
+// 🔥 ATUALIZADO: Incluído o KeyboardAvoidingView e o Platform para gerenciar o teclado no Android
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { GastosContext } from './App'; // Consumindo do arquivo centralizador
 
@@ -29,7 +30,7 @@ export default function TelaIA() {
   const [inputGanho, setInputGanho] = useState('');
   const [dicaIA, setDicaIA] = useState("");
   
-  // 🔥 OPÇÃO 2: Estado de controle para evitar duplo clique ao salvar ganho
+  // Controle para evitar duplo clique ao salvar ganho
   const [salvandoGanho, setSalvandoGanho] = useState(false);
 
   // --- ESTADOS DO CHAT INTERATIVO ---
@@ -48,7 +49,7 @@ export default function TelaIA() {
   const barraGanho = totalMovimentado > 0 ? (totalGanhos / totalMovimentado) * 100 : 50;
   const barraGasto = totalMovimentado > 0 ? (totalGasto / totalMovimentado) * 100 : 50;
 
-  // --- 🔥 OPÇÃO 3: EXTRATO REATIVO ORDENADO CRONOLOGICAMENTE PELO TIMESTAMP DO FIREBASE ---
+  // --- EXTRATO REATIVO ORDENADO CRONOLOGICAMENTE PELO TIMESTAMP DO FIREBASE ---
   const historicoUnificado = [
     ...listaGanhos.map(g => {
       const tempoGanho = g.criadoEm?.seconds ? g.criadoEm.seconds * 1000 : (g.sortTime || 0);
@@ -85,7 +86,7 @@ export default function TelaIA() {
     }
   }, [gastos, listaGanhos]);
 
-  // 🔥 OPÇÃO 2: Envio de novos Ganhos com trava de requisição
+  // Envio de novos Ganhos com trava de requisição
   const lidarAdicionarGanho = async () => {
     const valor = parseFloat(inputGanho.replace(',', '.'));
     if (!isNaN(valor) && valor > 0) {
@@ -165,7 +166,11 @@ export default function TelaIA() {
   };
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+    <ScrollView 
+      style={styles.container} 
+      showsVerticalScrollIndicator={false} 
+      keyboardShouldPersistTaps="handled"
+    >
       {/* Cabeçalho */}
       <View style={styles.headerIA}>
         <Ionicons name="hardware-chip" size={38} color="#4F46E5" />
@@ -185,12 +190,12 @@ export default function TelaIA() {
             keyboardType="numeric"
             value={inputGanho}
             onChangeText={setInputGanho}
-            editable={!salvandoGanho} // Trava o campo enquanto salva
+            editable={!salvandoGanho}
             style={styles.inputGanhos}
           />
           <TouchableOpacity 
             onPress={lidarAdicionarGanho} 
-            disabled={salvandoGanho || !inputGanho} // Desabilita clique extra
+            disabled={salvandoGanho || !inputGanho}
             style={[styles.btnApp, (salvandoGanho || !inputGanho) && { backgroundColor: '#A5B4FC' }]}
           >
             {salvandoGanho ? (
@@ -242,7 +247,7 @@ export default function TelaIA() {
               key={item.id} 
               style={styles.itemExtrato}
               onPress={() => item.tipo === 'ganho' && abrirGerenciadorGanho(item)}
-              disabled={item.tipo !== 'ganho'} // Bloqueia interações que não sejam ganhos
+              disabled={item.tipo !== 'ganho'}
             >
               <View style={styles.extratoLeft}>
                 <Ionicons name={item.icone} size={22} color={item.cor} />
@@ -266,46 +271,58 @@ export default function TelaIA() {
       </View>
 
       {/* 💬 SEÇÃO 5: CHAT BOT INTERATIVO COM A IA */}
-      <View style={styles.cardChatContainer}>
-        <Text style={styles.tituloSecao}>💬 Converse com a Inteligência Comportamental</Text>
-        
-        <View style={styles.areaMensagensChat}>
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            {mensagensChat.map((msg) => (
-              <View key={msg.id} style={[styles.balaoMensagem, msg.de === 'user' ? styles.balaoUsuario : styles.balaoIA]}>
-                <Text style={{ fontSize: 13, color: msg.de === 'user' ? '#FFF' : '#1E293B', lineHeight: 18 }}>
-                  {msg.texto}
-                </Text>
-              </View>
-            ))}
-            {isDigitando && (
-              <View style={[styles.balaoMensagem, styles.balaoIA, { flexDirection: 'row', alignItems: 'center' }]}>
-                <ActivityIndicator size="small" color="#4F46E5" />
-                <Text style={{ fontSize: 12, color: '#64748B', marginLeft: 6, fontStyle: 'italic' }}>Analisando...</Text>
-              </View>
-            )}
-          </ScrollView>
-        </View>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      >
+        <View style={styles.cardChatContainer}>
+          <Text style={styles.tituloSecao}>💬 Converse com a Inteligência Comportamental</Text>
+          
+          <View style={styles.areaMensagensChat}>
+            {/* 🔥 CORRIGIDO: nestedScrollEnabled={true} adicionado para destravar os gestos no Android */}
+            <ScrollView 
+              nestedScrollEnabled={true}
+              showsVerticalScrollIndicator={true} 
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ flexGrow: 1, paddingBottom: 10 }}
+            >
+              {mensagensChat.map((msg) => (
+                <View key={msg.id} style={[styles.balaoMensagem, msg.de === 'user' ? styles.balaoUsuario : styles.balaoIA]}>
+                  <Text style={{ fontSize: 13, color: msg.de === 'user' ? '#FFF' : '#1E293B', lineHeight: 18 }}>
+                    {msg.texto}
+                  </Text>
+                </View>
+              ))}
+              {isDigitando && (
+                <View style={[styles.balaoMensagem, styles.balaoIA, { flexDirection: 'row', alignItems: 'center' }]}>
+                  <ActivityIndicator size="small" color="#4F46E5" />
+                  <Text style={{ fontSize: 12, color: '#64748B', marginLeft: 6, fontStyle: 'italic' }}>Analisando...</Text>
+                </View>
+              )}
+            </ScrollView>
+          </View>
 
-        <View style={styles.containerInputChat}>
-          <TextInput
-            placeholder="Pergunte algo para a inteligência..."
-            placeholderTextColor="#A0AEC0"
-            value={mensagemUsuario}
-            onChangeText={setMensagemUsuario}
-            style={styles.inputChatTexto}
-          />
-          <TouchableOpacity onPress={enviarMensagemChat} style={styles.btnEnviarChat}>
-            <Ionicons name="send" size={16} color="#FFF" />
-          </TouchableOpacity>
+          <View style={styles.containerInputChat}>
+            <TextInput
+              placeholder="Pergunte algo para a inteligência..."
+              placeholderTextColor="#A0AEC0"
+              value={mensagemUsuario}
+              onChangeText={setMensagemUsuario}
+              style={styles.inputChatTexto}
+            />
+            <TouchableOpacity onPress={enviarMensagemChat} style={styles.btnEnviarChat}>
+              <Ionicons name="send" size={16} color="#FFF" />
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
 
       <View style={{ height: 40 }} />
     </ScrollView>
   );
 }
 
+// 🎨 MAPEAMENTO DE ESTILOS GLOBAIS DA TELA DA IA
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC', padding: 20 },
   headerIA: { flexDirection: 'row', alignItems: 'center', marginBottom: 20, marginTop: 10 },

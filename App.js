@@ -43,6 +43,7 @@ import TelaIA from './TelaIA';
 import { LogBox } from 'react-native';
 LogBox.ignoreLogs(['@firebase/firestore: Firestore']);
 
+
 // Inicialização do Contexto Global
 export const GastosContext = createContext();
 
@@ -1184,14 +1185,18 @@ export default function App() {
   const [carregandoGanhos, setCarregandoGanhos] = useState(true);
   const [dadosPerfil, setDadosPerfil] = useState({ nome: 'Albert', telefone: '', cargo: 'Usuário' });
 
-  // Monitor Global: Login + Gastos + Ganhos + Dados de Perfil
+
+ // Monitor Global: Login + Gastos + Ganhos + Dados de Perfil
   useEffect(() => {
-    // 1. Monitora se o usuário está logado
+    // 🔥 CORREÇÃO: Declaradas aqui no topo do hook para o 'else' ter acesso a elas!
+    let unsubscribeGastos = null;
+    let unsubscribeGanhos = null;
+    let unsubscribePerfil = null;
+
     const unsubscribeAuth = onAuthStateChanged(auth, (usuarioLogado) => {
-      setUser(usuarioLogado);
-      
       if (usuarioLogado) {
         console.log("✅ Conectado como:", usuarioLogado.uid);
+        setUser(usuarioLogado); // Define o usuário logado
 
         // 2. ESCUTA GASTOS (Sincronização em Tempo Real)
         const qGastos = query(
@@ -1199,40 +1204,34 @@ export default function App() {
           where("userId", "==", usuarioLogado.uid),
           orderBy("criadoEm", "desc")
         );
-
-        const unsubscribeGastos = onSnapshot(qGastos, (snapshot) => {
-          const lista = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          }));
+        unsubscribeGastos = onSnapshot(qGastos, (snapshot) => {
+          const lista = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
           setGastos(lista);
           console.log("📊 Gastos sincronizados:", lista.length);
         });
 
-        // 🔥 3. NOVO: ESCUTA GANHOS (Sincronização em Tempo Real sem reset)
+        // 3. ESCUTA GANHOS (Sincronização em Tempo Real sem reset)
         const qGanhos = query(
           collection(db, "ganhos"),
           where("userId", "==", usuarioLogado.uid)
         );
-
-        const unsubscribeGanhos = onSnapshot(qGanhos, (snapshot) => {
-          const listaGanhosCarregados = snapshot.docs.map(docSnap => ({
-            id: docSnap.id,
-            ...docSnap.data()
-          }));
-          // Ordena de forma reativa pelo tempo
+        unsubscribeGanhos = onSnapshot(qGanhos, (snapshot) => {
+          const listaGanhosCarregados = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
           listaGanhosCarregados.sort((a, b) => (b.sortTime || 0) - (a.sortTime || 0));
           setGanhos(listaGanhosCarregados);
           setCarregandoGanhos(false);
           console.log("💸 Ganhos sincronizados:", listaGanhosCarregados.length);
         }, (error) => {
-          console.error("Erro ao escutar ganhos:", error);
+          // 🔥 Evita exibir o erro no console se o usuário acabou de clicar em deslogar
+          if (auth.currentUser) {
+            console.error("Erro ao escutar ganhos:", error);
+          }
           setCarregandoGanhos(false);
         });
 
         // 4. ESCUTA PERFIL (Nome, Telefone, Cargo no Firestore)
         const docRef = doc(db, "usuarios", usuarioLogado.uid);
-        const unsubscribePerfil = onSnapshot(docRef, (docSnap) => {
+        unsubscribePerfil = onSnapshot(docRef, (docSnap) => {
           if (docSnap.exists()) {
             setDadosPerfil(docSnap.data());
             console.log("👤 Dados de perfil carregados!");
@@ -1241,23 +1240,29 @@ export default function App() {
 
         setCarregando(false);
 
-        // Limpeza de todos os ouvintes ao deslogar ou fechar o app
-        return () => {
-          unsubscribeGastos();
-          unsubscribeGanhos(); // 🔥 Desliga o monitor de ganhos
-          unsubscribePerfil();
-        };
       } else {
-        // Se deslogar, limpa todo o cache de estados globais
+        // 🚨 O SEGREDO: Se o usuário clicou em sair, desliga os monitores do Firestore PRIMEIRO
+        if (unsubscribeGastos) unsubscribeGastos();
+        if (unsubscribeGanhos) unsubscribeGanhos();
+        if (unsubscribePerfil) unsubscribePerfil();
+
+        // Só depois que a conexão com a nuvem fechou de forma segura, limpamos o cache local
         setGastos([]);
-        setGanhos([]); // 🔥 Zera o estado local ao deslogar
+        setGanhos([]);
         setDadosPerfil({ nome: 'Albert', telefone: '', cargo: 'Usuário' });
         setCarregandoGanhos(true);
+        setUser(null); // Movemos para o final do fluxo de limpeza para evitar o delay de permissão
         setCarregando(false);
       }
     });
 
-    return unsubscribeAuth; 
+    // Limpeza padrão caso o componente desmonte (fechar o app)
+    return () => {
+      if (unsubscribeGastos) unsubscribeGastos();
+      if (unsubscribeGanhos) unsubscribeGanhos();
+      if (unsubscribePerfil) unsubscribePerfil();
+      unsubscribeAuth();
+    }; 
   }, []);
 
   // 🔥 5. NOVO: FUNÇÕES DE MUTABILIDADE DOS GANHOS NO CLOUD FIRESTORE
